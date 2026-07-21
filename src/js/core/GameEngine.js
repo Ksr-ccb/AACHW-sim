@@ -7,10 +7,13 @@ export class GameEngine {
     this.player = null;
     this.aoes = [];
     this.bgImage = null;
+    this.markerOverlay = null;
     this.running = false;
+    this.mechActive = false;
     this.gameOver = false;
     this.lastTime = null;
     this._rafId = null;
+    this._mechanicTick = null;
   }
 
   loadBackground(src) {
@@ -26,27 +29,43 @@ export class GameEngine {
     });
   }
 
-  start(mechanicFn) {
+  // 게임루프 시작 (기믹 타임라인은 아직 시작 안 함)
+  init() {
     if (this.player) this.player.destroy();
+    this.player = new Player(this.canvas.width / 2, this.canvas.height / 2, 15);
     this.aoes = [];
     this.gameOver = false;
+    this.mechActive = false;
+    this._mechanicTick = null;
     this.running = true;
     this.lastTime = null;
-
-    this.player = new Player(
-      this.canvas.width / 2,
-      this.canvas.height / 2,
-      15
-    );
-
-    // mechanic provides initial AoE list (and can push more over time via timeline)
-    this._mechanicTick = mechanicFn ? mechanicFn(this) : null;
-
+    if (this._rafId) cancelAnimationFrame(this._rafId);
     this._rafId = requestAnimationFrame((t) => this._loop(t));
+  }
+
+  // 기믹 타임라인 시작
+  beginMechanic(mechanicFn) {
+    if (this.gameOver) return;
+    this.aoes = [];
+    this.mechActive = true;
+    this._mechanicTick = mechanicFn ? mechanicFn(this) : null;
+  }
+
+  // 플레이어 위치 + AoE 초기화, 게임루프는 유지
+  reset() {
+    this.mechActive = false;
+    this._mechanicTick = null;
+    this.aoes = [];
+    this.gameOver = false;
+    if (this.player) {
+      this.player.x = this.canvas.width / 2;
+      this.player.y = this.canvas.height / 2;
+    }
   }
 
   stop() {
     this.running = false;
+    this.mechActive = false;
     if (this._rafId) cancelAnimationFrame(this._rafId);
     if (this.player) this.player.destroy();
   }
@@ -59,7 +78,7 @@ export class GameEngine {
     if (!this.gameOver) {
       this.player.update(this.canvas.width, this.canvas.height);
 
-      if (this._mechanicTick) this._mechanicTick(dt);
+      if (this.mechActive && this._mechanicTick) this._mechanicTick(dt);
 
       for (const aoe of this.aoes) {
         aoe.update(dt);
@@ -80,6 +99,8 @@ export class GameEngine {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (this.bgImage) ctx.drawImage(this.bgImage, 0, 0);
+
+    if (this.markerOverlay) this.markerOverlay.draw(ctx);
 
     for (const aoe of this.aoes) aoe.draw(ctx);
 

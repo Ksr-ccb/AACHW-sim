@@ -1,7 +1,7 @@
 const canvas = document.getElementById('arena-canvas');
 const ctx = canvas.getContext('2d');
 
-const SPEED = 4;
+const SPEED = 5;
 const DOT_RADIUS = 15;
 
 let player = { x: 0, y: 0 };
