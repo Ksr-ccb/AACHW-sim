@@ -24,6 +24,15 @@ export class MarkerOverlay {
     this.activeMarker = type;
   }
 
+  applyPreset(preset) {
+    for (const [type, { rx, ry }] of Object.entries(preset)) {
+      this.markers[type] = {
+        x: rx * this.canvas.width,
+        y: ry * this.canvas.height,
+      };
+    }
+  }
+
   clear() {
     this.markers = {};
   }

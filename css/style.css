@@ -103,7 +103,15 @@ body {
   padding: 16px;
 }
 
-/* ── 기믹 탭 ─────────────────────────────────── */
+/* ── 상단 바 (기믹 탭 + 시작·초기화) ─────────── */
+#top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 #mechanic-selector {
   display: flex;
   gap: 8px;
@@ -129,20 +137,13 @@ body {
   border-color: #7777ee;
 }
 
-/* ── 툴바 행 (바닥징 왼쪽 | 시작·초기화 오른쪽) ─ */
-#toolbar-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 90vw;
-  gap: 48px;
-}
-
 /* ── 시작 / 초기화 ───────────────────────────── */
 #controls {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
+  border-left: 1px solid #444;
+  padding-left: 12px;
 }
 
 #btn-start {
@@ -170,12 +171,17 @@ body {
 
 #btn-reset:hover { background: #666; }
 
-/* ── 바닥징 패널 ─────────────────────────────── */
+/* ── 바닥징 패널 (캔버스 위 overlay) ────────── */
 #marker-panel {
-  background: #222;
-  border: 1px solid #444;
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  background: rgba(18, 18, 18, 0.88);
+  border: 1px solid #555;
   border-radius: 6px;
   overflow: hidden;
+  min-width: 160px;
 }
 
 #btn-marker-panel-toggle {
@@ -241,7 +247,21 @@ body {
 .marker-btn:hover { background: #444; }
 .marker-btn.active { background: #3a3a3a; box-shadow: 0 0 0 2px #fff; }
 
-/* ── 전체 지우기 / 숨기기 ────────────────────── */
+/* ── 기본 프리셋 / 전체 지우기 / 숨기기 ─────── */
+#btn-marker-preset {
+  grid-column: span 4;
+  padding: 5px 0;
+  background: #2a3a5a;
+  color: #7aadff;
+  border: 1px solid #3a5a8a;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+#btn-marker-preset:hover { background: #334d7a; color: #aaccff; }
+
 #btn-marker-clear,
 #btn-marker-toggle {
   grid-column: span 2;

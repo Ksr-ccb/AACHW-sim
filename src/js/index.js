@@ -16,6 +16,18 @@ const MECHANICS = {
 
 const MARKER_TYPES = ['A', 'B', 'C', 'D', '1', '2', '3', '4'];
 
+// 바닥징 기본 프리셋 — 이미지 기준 상대 좌표 (0~1)
+const DEFAULT_PRESET = {
+  A: { rx: 0.50, ry: 0.215 },
+  B: { rx: 0.785, ry: 0.50 },
+  C: { rx: 0.50, ry: 0.785 },
+  D: { rx: 0.215, ry: 0.50 },
+  1: { rx: 0.50, ry: 0.333 },
+  2: { rx: 0.672, ry: 0.50 },
+  3: { rx: 0.50, ry: 0.672 },
+  4: { rx: 0.327, ry: 0.50 },
+};
+
 const canvas = document.getElementById('arena-canvas');
 const engine = new GameEngine(canvas);
 const markers = new MarkerOverlay(canvas);
@@ -78,6 +90,10 @@ function buildMarkerToolbar() {
       if (!alreadyActive) btn.classList.add('active');
     });
     toolbar.appendChild(btn);
+  });
+
+  document.getElementById('btn-marker-preset').addEventListener('click', () => {
+    markers.applyPreset(DEFAULT_PRESET);
   });
 
   document.getElementById('btn-marker-clear').addEventListener('click', () => {

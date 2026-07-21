@@ -14,6 +14,12 @@ export class GameEngine {
     this.lastTime = null;
     this._rafId = null;
     this._mechanicTick = null;
+    // 원형 아레나 반지름 (이미지 기준 비율, 필요 시 기믹별 override)
+    this.arenaRadiusRatio = 0.43;
+  }
+
+  get arenaRadius() {
+    return Math.min(this.canvas.width, this.canvas.height) * this.arenaRadiusRatio;
   }
 
   loadBackground(src) {
@@ -76,7 +82,7 @@ export class GameEngine {
     this.lastTime = timestamp;
 
     if (!this.gameOver) {
-      this.player.update(this.canvas.width, this.canvas.height);
+      this.player.update(this.canvas.width, this.canvas.height, this.arenaRadius);
 
       if (this.mechActive && this._mechanicTick) this._mechanicTick(dt);
 

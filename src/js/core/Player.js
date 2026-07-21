@@ -17,14 +17,22 @@ export class Player {
     document.addEventListener('keyup', this._onKeyUp);
   }
 
-  update(canvasWidth, canvasHeight) {
+  update(canvasWidth, canvasHeight, arenaRadius) {
     if (this.keys.has('w')) this.y -= this.speed;
     if (this.keys.has('s')) this.y += this.speed;
     if (this.keys.has('a')) this.x -= this.speed;
     if (this.keys.has('d')) this.x += this.speed;
 
-    this.x = Math.max(this.radius, Math.min(canvasWidth - this.radius, this.x));
-    this.y = Math.max(this.radius, Math.min(canvasHeight - this.radius, this.y));
+    const cx = canvasWidth / 2;
+    const cy = canvasHeight / 2;
+    const dx = this.x - cx;
+    const dy = this.y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const limit = arenaRadius - this.radius;
+    if (dist > limit) {
+      this.x = cx + (dx / dist) * limit;
+      this.y = cy + (dy / dist) * limit;
+    }
   }
 
   draw(ctx) {
