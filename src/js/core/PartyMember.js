@@ -22,6 +22,16 @@ export class PartyMember {
     this.targetY = y;
   }
 
+  // duration ms 안에 정확히 도착하도록 속도를 역산
+  tweenTo(x, y, duration) {
+    const dx = x - this.x;
+    const dy = y - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    this.speed = dist > 0 ? dist / (duration / 16) : 0;
+    this.targetX = x;
+    this.targetY = y;
+  }
+
   update(dt) {
     if (!this.alive) return;
     const dx = this.targetX - this.x;

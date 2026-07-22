@@ -116,11 +116,14 @@ export class GameEngine {
   }
 
   // 기믹에서 파티원 목표 위치 지정
-  // posMap: { T1: {x, y}, H2: {x, y}, ... }
-  setPartyPositions(posMap) {
+  // posMap   : { T1: {x, y}, H2: {x, y}, ... }
+  // duration : 지정하면 tweenTo로 정확히 해당 ms 안에 도착, 생략하면 현재 speed로 이동
+  setPartyPositions(posMap, duration = null) {
     for (const pm of this.partyMembers) {
       const pos = posMap[pm.role];
-      if (pos) pm.setTarget(pos.x, pos.y);
+      if (!pos) continue;
+      if (duration !== null) pm.tweenTo(pos.x, pos.y, duration);
+      else pm.setTarget(pos.x, pos.y);
     }
   }
 
