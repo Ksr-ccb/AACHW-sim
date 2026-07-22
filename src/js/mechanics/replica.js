@@ -116,8 +116,8 @@ export function mechanicTick(engine) {
   let castDone     = false;
   let aoeDone      = false;
   let clones       = null;   // { A, B, C, D }
-  let castPair     = null;        // ['A','C'] | ['B','D']
-  let castDirs     = null;        // 발사 방향 2개 [dir1, dir2]
+  let castPair     = null;   // ['A','C'] | ['B','D']
+  let castDirs     = null;   // 발사 방향 2개 [dir1, dir2]
   let castStartMs  = 0;
 
   return (dt) => {
@@ -161,12 +161,12 @@ export function mechanicTick(engine) {
       }
     }
 
-    // 1. 시작 1초후 ai 플레이어와 분신이 등장 및 이동
-    // 2, 시작 1.5초후 분신에게 3초짜리 캐스팅바가 시작함.
+    // 1. 시작 1초후 ai 플레이어와 분신이 등장 및 이동 [v]
+    // 2, 시작 1.5초후 분신에게 3초짜리 캐스팅바가 시작함. [v]
     //   => 이때 AC / BD 세트로 불,어둠 / 좌 혹은 우 부채꼴 AOE 장판 생성 결정
     //   TODO: 불,어둠 장판과 좌 혹은 우 부채꼴 장판 기능 함수 제작 (각 장판 디버프 생성, 불장판은 분신이동)
-    // 3. 분신의 3초짜리 캐스팅바가 50프로진행되었을 때, AOE장판의 경우 생성위치 미리 보여줌
-    //   TODO: AOE 전조와 착탄 차이를 색상 변경으로 표기(노랑->빨강)
+    // 3. 분신의 3초짜리 캐스팅바가 70프로진행되었을 때, AOE장판의 경우 생성위치 미리 보여줌 [v]
+    //   TODO: AOE 전조와 착탄 차이를 색상 변경으로 표기(노랑->빨강) [v]
     //   => 장판 생성위치를 보고 AI플레이어 안전지대로 임의 소량이동 (45도 각도중앙에 위치하면 안전지대되게 AOE임의설정)
     //   => TODO: AI플레이어 기본이동속도 조절
     // 4. 분신의 3초짜리 캐스팅바가 70프로 진행되었을 때, 불/어둠 대상자 선별종료
