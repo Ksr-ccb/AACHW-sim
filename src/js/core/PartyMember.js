@@ -5,7 +5,7 @@ export class PartyMember {
     this.role = role;
     this.x = x;
     this.y = y;
-    this.radius = 12;
+    this.radius = 18;
     this.targetX = x;
     this.targetY = y;
     this.speed = 3.5;

@@ -52,7 +52,7 @@ export class GameEngine {
     const cx = this.canvas.width / 2;
     const cy = this.canvas.height / 2;
 
-    this.player = new Player(cx, cy, 15, this.selectedRole);
+    this.player = new Player(cx, cy, 20, this.selectedRole);
     this.boss = new Boss(cx, cy, this.tileSize);
     this.boss.setScale(2.0);
 
