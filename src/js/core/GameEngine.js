@@ -1,10 +1,12 @@
 import { Player } from './Player.js';
+import { Boss } from './Boss.js';
 
 export class GameEngine {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.player = null;
+    this.boss = null;
     this.aoes = [];
     this.bgImage = null;
     this.markerOverlay = null;
@@ -35,10 +37,17 @@ export class GameEngine {
     });
   }
 
+  // 아레나 기준 1타일 크기 (arenaRadius 의 1/10)
+  get tileSize() {
+    return this.arenaRadius / 10;
+  }
+
   // 게임루프 시작 (기믹 타임라인은 아직 시작 안 함)
   init() {
     if (this.player) this.player.destroy();
     this.player = new Player(this.canvas.width / 2, this.canvas.height / 2, 15);
+    this.boss = new Boss(this.canvas.width / 2, this.canvas.height / 2, this.tileSize);
+    this.boss.setScale(2.0);
     this.aoes = [];
     this.gameOver = false;
     this.mechActive = false;
@@ -84,6 +93,8 @@ export class GameEngine {
     if (!this.gameOver) {
       this.player.update(this.canvas.width, this.canvas.height, this.arenaRadius);
 
+      if (this.boss) this.boss.update(dt);
+
       if (this.mechActive && this._mechanicTick) this._mechanicTick(dt);
 
       for (const aoe of this.aoes) {
@@ -107,6 +118,8 @@ export class GameEngine {
     if (this.bgImage) ctx.drawImage(this.bgImage, 0, 0);
 
     if (this.markerOverlay) this.markerOverlay.draw(ctx);
+
+    if (this.boss) this.boss.draw(ctx);
 
     for (const aoe of this.aoes) aoe.draw(ctx);
 
