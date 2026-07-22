@@ -1,5 +1,8 @@
 import { Player } from './Player.js';
 import { Boss } from './Boss.js';
+import { PartyMember } from './PartyMember.js';
+
+export const ALL_ROLES = ['T1', 'T2', 'H1', 'H2', 'D1', 'D2', 'D3', 'D4'];
 
 export class GameEngine {
   constructor(canvas) {
@@ -7,6 +10,9 @@ export class GameEngine {
     this.ctx = canvas.getContext('2d');
     this.player = null;
     this.boss = null;
+    this.partyMembers = [];
+    this.partyVisible = true;
+    this.selectedRole = 'D1';
     this.aoes = [];
     this.bgImage = null;
     this.markerOverlay = null;
@@ -16,12 +22,15 @@ export class GameEngine {
     this.lastTime = null;
     this._rafId = null;
     this._mechanicTick = null;
-    // 원형 아레나 반지름 (이미지 기준 비율, 필요 시 기믹별 override)
     this.arenaRadiusRatio = 0.43;
   }
 
   get arenaRadius() {
     return Math.min(this.canvas.width, this.canvas.height) * this.arenaRadiusRatio;
+  }
+
+  get tileSize() {
+    return this.arenaRadius / 10;
   }
 
   loadBackground(src) {
@@ -37,17 +46,20 @@ export class GameEngine {
     });
   }
 
-  // 아레나 기준 1타일 크기 (arenaRadius 의 1/10)
-  get tileSize() {
-    return this.arenaRadius / 10;
-  }
-
-  // 게임루프 시작 (기믹 타임라인은 아직 시작 안 함)
   init() {
     if (this.player) this.player.destroy();
-    this.player = new Player(this.canvas.width / 2, this.canvas.height / 2, 15);
-    this.boss = new Boss(this.canvas.width / 2, this.canvas.height / 2, this.tileSize);
+
+    const cx = this.canvas.width / 2;
+    const cy = this.canvas.height / 2;
+
+    this.player = new Player(cx, cy, 15, this.selectedRole);
+    this.boss = new Boss(cx, cy, this.tileSize);
     this.boss.setScale(2.0);
+
+    const partyRoles = ALL_ROLES.filter((r) => r !== this.selectedRole);
+    this.partyMembers = partyRoles.map((r) => new PartyMember(r, cx, cy));
+    for (const pm of this.partyMembers) pm.visible = this.partyVisible;
+
     this.aoes = [];
     this.gameOver = false;
     this.mechActive = false;
@@ -58,7 +70,6 @@ export class GameEngine {
     this._rafId = requestAnimationFrame((t) => this._loop(t));
   }
 
-  // 기믹 타임라인 시작
   beginMechanic(mechanicFn) {
     if (this.gameOver) return;
     this.aoes = [];
@@ -66,15 +77,21 @@ export class GameEngine {
     this._mechanicTick = mechanicFn ? mechanicFn(this) : null;
   }
 
-  // 플레이어 위치 + AoE 초기화, 게임루프는 유지
   reset() {
     this.mechActive = false;
     this._mechanicTick = null;
     this.aoes = [];
     this.gameOver = false;
+    const cx = this.canvas.width / 2;
+    const cy = this.canvas.height / 2;
     if (this.player) {
-      this.player.x = this.canvas.width / 2;
-      this.player.y = this.canvas.height / 2;
+      this.player.x = cx;
+      this.player.y = cy;
+    }
+    for (const pm of this.partyMembers) {
+      pm.x = cx; pm.y = cy;
+      pm.targetX = cx; pm.targetY = cy;
+      pm.alive = true;
     }
   }
 
@@ -83,6 +100,28 @@ export class GameEngine {
     this.mechActive = false;
     if (this._rafId) cancelAnimationFrame(this._rafId);
     if (this.player) this.player.destroy();
+  }
+
+  // 역할 변경 — 실행 중이면 재초기화
+  setPlayerRole(role) {
+    this.selectedRole = role;
+    if (this.running) this.init();
+  }
+
+  // 파티원 오버레이 토글, 반환값: 현재 visible 상태
+  togglePartyVisible() {
+    this.partyVisible = !this.partyVisible;
+    for (const pm of this.partyMembers) pm.visible = this.partyVisible;
+    return this.partyVisible;
+  }
+
+  // 기믹에서 파티원 목표 위치 지정
+  // posMap: { T1: {x, y}, H2: {x, y}, ... }
+  setPartyPositions(posMap) {
+    for (const pm of this.partyMembers) {
+      const pos = posMap[pm.role];
+      if (pos) pm.setTarget(pos.x, pos.y);
+    }
   }
 
   _loop(timestamp) {
@@ -95,15 +134,26 @@ export class GameEngine {
 
       if (this.boss) this.boss.update(dt);
 
+      for (const pm of this.partyMembers) pm.update(dt);
+
       if (this.mechActive && this._mechanicTick) this._mechanicTick(dt);
 
+      // AoE 업데이트
+      for (const aoe of this.aoes) aoe.update(dt);
+
+      // 플레이어 피격
       for (const aoe of this.aoes) {
-        aoe.update(dt);
-        if (aoe.hitsPlayer(this.player)) {
-          this.gameOver = true;
-          break;
+        if (aoe.hitsPlayer(this.player)) { this.gameOver = true; break; }
+      }
+
+      // 파티원 피격 (오버레이 off여도 판정)
+      for (const pm of this.partyMembers) {
+        if (!pm.alive) continue;
+        for (const aoe of this.aoes) {
+          if (aoe.hitsPlayer(pm)) { pm.alive = false; break; }
         }
       }
+
       this.aoes = this.aoes.filter((a) => !a.done);
     }
 
@@ -122,6 +172,8 @@ export class GameEngine {
     if (this.boss) this.boss.draw(ctx);
 
     for (const aoe of this.aoes) aoe.draw(ctx);
+
+    for (const pm of this.partyMembers) pm.draw(ctx);
 
     this.player.draw(ctx);
 

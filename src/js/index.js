@@ -1,4 +1,4 @@
-import { GameEngine } from './core/GameEngine.js';
+import { GameEngine, ALL_ROLES } from './core/GameEngine.js';
 import { MarkerOverlay } from './core/MarkerOverlay.js';
 import * as replica from './mechanics/replica.js';
 import * as mimicCell from './mechanics/mimicCell.js';
@@ -115,7 +115,41 @@ function buildMarkerToolbar() {
   });
 }
 
+// ── 역할 선택 + 파티원 오버레이 ──────────────
+function roleClass(role) {
+  if (role.startsWith('T')) return 'tank';
+  if (role.startsWith('H')) return 'healer';
+  return 'dps';
+}
+
+function buildRoleSelector() {
+  const selector = document.getElementById('role-selector');
+
+  ALL_ROLES.forEach((role) => {
+    const btn = document.createElement('button');
+    btn.className = `role-btn ${roleClass(role)}`;
+    btn.dataset.role = role;
+    btn.textContent = role;
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.role-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      engine.setPlayerRole(role);
+    });
+    selector.appendChild(btn);
+  });
+
+  // 기본 선택 표시
+  selector.querySelector(`[data-role="${engine.selectedRole}"]`)?.classList.add('active');
+
+  const btnToggle = document.getElementById('btn-party-toggle');
+  btnToggle.addEventListener('click', () => {
+    const visible = engine.togglePartyVisible();
+    btnToggle.textContent = visible ? '파티원 숨기기' : '파티원 표시';
+  });
+}
+
 buildMechanicTabs();
 buildControls();
 buildMarkerToolbar();
+buildRoleSelector();
 selectMechanic('replica');

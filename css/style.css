@@ -171,6 +171,72 @@ body {
 
 #btn-reset:hover { background: #666; }
 
+/* ── 파티 바 (역할 선택 + 파티원 토글) ──────── */
+#party-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 6px 12px;
+  background: rgba(30,30,30,0.8);
+  border: 1px solid #444;
+  border-radius: 6px;
+}
+
+.party-bar-label {
+  font-size: 12px;
+  color: #888;
+  flex-shrink: 0;
+}
+
+#role-selector {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.role-btn {
+  padding: 4px 10px;
+  background: #2a2a2a;
+  border: 2px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  color: #ccc;
+  min-width: 36px;
+  text-align: center;
+}
+
+.role-btn:hover { background: #383838; }
+
+.role-btn.tank        { border-color: #336699; color: #88bbff; }
+.role-btn.tank:hover  { background: #1a2a3a; }
+.role-btn.tank.active { background: #1a3a5a; border-color: #4488ff; color: #ffffff; box-shadow: 0 0 0 1px #4488ff; }
+
+.role-btn.healer        { border-color: #336633; color: #88cc88; }
+.role-btn.healer:hover  { background: #1a2a1a; }
+.role-btn.healer.active { background: #1a4a1a; border-color: #44cc44; color: #ffffff; box-shadow: 0 0 0 1px #44cc44; }
+
+.role-btn.dps        { border-color: #663333; color: #ff8888; }
+.role-btn.dps:hover  { background: #2a1a1a; }
+.role-btn.dps.active { background: #4a1a1a; border-color: #ff4444; color: #ffffff; box-shadow: 0 0 0 1px #ff4444; }
+
+#btn-party-toggle {
+  padding: 4px 12px;
+  background: #333;
+  color: #aaa;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+#btn-party-toggle:hover { background: #444; color: #fff; }
+
 /* ── 바닥징 패널 (캔버스 위 overlay) ────────── */
 #marker-panel {
   position: absolute;

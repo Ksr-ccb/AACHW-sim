@@ -1,8 +1,11 @@
+const ROLE_COLOR = { T: '#4488ff', H: '#44cc44', D: '#ff4444' };
+
 export class Player {
-  constructor(x, y, radius) {
+  constructor(x, y, radius, role = null) {
     this.x = x;
     this.y = y;
     this.radius = radius;
+    this.role = role;
     this.speed = 4;
     this.keys = new Set();
 
@@ -15,6 +18,11 @@ export class Player {
 
     document.addEventListener('keydown', this._onKeyDown);
     document.addEventListener('keyup', this._onKeyUp);
+  }
+
+  get color() {
+    if (!this.role) return '#ff3333';
+    return ROLE_COLOR[this.role[0]] ?? '#ff3333';
   }
 
   update(canvasWidth, canvasHeight, arenaRadius) {
@@ -36,13 +44,22 @@ export class Player {
   }
 
   draw(ctx) {
+    const r = this.radius;
     ctx.beginPath();
-    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-    ctx.fillStyle = '#ff3333';
+    ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = this.color;
     ctx.fill();
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 5;
     ctx.stroke();
+
+    if (this.role) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `bold ${Math.floor(r * 0.85)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.role, this.x, this.y);
+    }
   }
 
   destroy() {
