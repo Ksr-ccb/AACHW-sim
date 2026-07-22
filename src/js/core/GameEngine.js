@@ -1,6 +1,8 @@
 import { Player } from './Player.js';
 import { Boss } from './Boss.js';
 import { PartyMember } from './PartyMember.js';
+import { BossClone } from './BossClone.js';
+import { PlayerReplica } from './PlayerReplica.js';
 
 export const ALL_ROLES = ['T1', 'T2', 'H1', 'H2', 'D1', 'D2', 'D3', 'D4'];
 
@@ -14,6 +16,8 @@ export class GameEngine {
     this.partyVisible = true;
     this.selectedRole = 'D1';
     this.aoes = [];
+    this.bossClones = [];
+    this.playerReplicas = [];
     this.bgImage = null;
     this.markerOverlay = null;
     this.running = false;
@@ -73,6 +77,8 @@ export class GameEngine {
   beginMechanic(mechanicFn) {
     if (this.gameOver) return;
     this.aoes = [];
+    this.bossClones = [];
+    this.playerReplicas = [];
     this.mechActive = true;
     this._mechanicTick = mechanicFn ? mechanicFn(this) : null;
   }
@@ -81,6 +87,8 @@ export class GameEngine {
     this.mechActive = false;
     this._mechanicTick = null;
     this.aoes = [];
+    this.bossClones = [];
+    this.playerReplicas = [];
     this.gameOver = false;
     const cx = this.canvas.width / 2;
     const cy = this.canvas.height / 2;
@@ -137,6 +145,8 @@ export class GameEngine {
 
       if (this.boss) this.boss.update(dt);
 
+      for (const clone of this.bossClones) clone.update(dt);
+
       for (const pm of this.partyMembers) pm.update(dt);
 
       if (this.mechActive && this._mechanicTick) this._mechanicTick(dt);
@@ -174,7 +184,11 @@ export class GameEngine {
 
     if (this.boss) this.boss.draw(ctx);
 
+    for (const clone of this.bossClones) clone.draw(ctx);
+
     for (const aoe of this.aoes) aoe.draw(ctx);
+
+    for (const replica of this.playerReplicas) replica.draw(ctx);
 
     for (const pm of this.partyMembers) pm.draw(ctx);
 

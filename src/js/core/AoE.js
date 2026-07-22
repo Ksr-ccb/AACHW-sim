@@ -53,7 +53,9 @@ export class CircleAoE {
 }
 
 export class FanAoE {
-  constructor({ x, y, radius, startAngle, endAngle, delay = 3000, duration = 500 }) {
+  // colors 옵션: { telegraphRGB, explodeRGB, telegraphStroke, explodeStroke }
+  //   telegraphRGB / explodeRGB : '255,220,0' 형식의 r,g,b 문자열
+  constructor({ x, y, radius, startAngle, endAngle, delay = 3000, duration = 500, colors = null }) {
     this.x = x;
     this.y = y;
     this.radius = radius;
@@ -63,6 +65,7 @@ export class FanAoE {
     this.duration = duration;
     this.elapsed = 0;
     this.done = false;
+    this.colors = colors;
   }
 
   get isExploding() {
@@ -92,16 +95,25 @@ export class FanAoE {
   draw(ctx) {
     const t = Math.min(this.elapsed / this.delay, 1);
     const alpha = this.isExploding ? 0.85 : 0.25 + t * 0.25;
-    const color = this.isExploding ? `rgba(255,80,0,${alpha})` : `rgba(255,60,60,${alpha})`;
+
+    let fillColor, strokeColor;
+    if (this.colors) {
+      const rgb = this.isExploding ? this.colors.explodeRGB : this.colors.telegraphRGB;
+      fillColor   = `rgba(${rgb},${alpha})`;
+      strokeColor = this.isExploding ? this.colors.explodeStroke : this.colors.telegraphStroke;
+    } else {
+      fillColor   = this.isExploding ? `rgba(255,80,0,${alpha})` : `rgba(255,60,60,${alpha})`;
+      strokeColor = this.isExploding ? '#ff8800' : '#ff4444';
+    }
 
     ctx.beginPath();
     ctx.moveTo(this.x, this.y);
     ctx.arc(this.x, this.y, this.radius, this.startAngle, this.endAngle);
     ctx.closePath();
-    ctx.fillStyle = color;
+    ctx.fillStyle   = fillColor;
     ctx.fill();
-    ctx.strokeStyle = this.isExploding ? '#ff8800' : '#ff4444';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth   = 2;
     ctx.stroke();
   }
 }

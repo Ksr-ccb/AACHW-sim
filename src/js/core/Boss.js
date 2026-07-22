@@ -1,3 +1,5 @@
+import { drawCastBar, createCastState, startCast, updateCast, stopCast } from './castBar.js';
+
 export class Boss {
   constructor(x, y, radius) {
     this.x = x;
@@ -7,18 +9,24 @@ export class Boss {
     this.angle = 0;
     this.scale = 1.0;
     this.visible = true;
+    this._cast = createCastState();
   }
 
-  get radius() {
-    return this.baseRadius * this.scale;
-  }
+  get radius() { return this.baseRadius * this.scale; }
 
   setFacing(angle)    { this.angle = angle; }
   setScale(scale)     { this.scale = scale; }
   setPosition(x, y)  { this.x = x; this.y = y; }
 
-  update(_dt) {
-    // 향후 이동/크기 변화 트위닝 등에 활용
+  // 캐스팅 시작: engine.boss.startCast('기술명', 3000)
+  startCast(name, durationMs) { startCast(this._cast, name, durationMs); }
+  stopCast()                   { stopCast(this._cast); }
+
+  get castProgress() { return this._cast.progress; }
+  get castName()     { return this._cast.name; }
+
+  update(dt) {
+    updateCast(this._cast, dt);
   }
 
   draw(ctx) {
@@ -36,12 +44,11 @@ export class Boss {
     ctx.stroke();
 
     // 머리 방향 표시 삼각형 (시계방향 각도 적용, 0 = 위)
-    // canvas 기본 좌표계에서 "위쪽"은 -Y이므로 angle=0일 때 PI 보정
     ctx.rotate(this.angle - Math.PI);
 
-    const tipY   = -(r + r * 0.25);       // 원 바깥으로 살짝 돌출
-    const baseY  =  -(r - r * 0.18);      // 원 안쪽 기저부
-    const baseHW =   r * 0.28;            // 기저 반폭
+    const tipY   = -(r + r * 0.25);
+    const baseY  =  -(r - r * 0.18);
+    const baseHW =   r * 0.28;
 
     ctx.beginPath();
     ctx.moveTo(0, tipY);
@@ -55,5 +62,11 @@ export class Boss {
     ctx.stroke();
 
     ctx.restore();
+
+    drawCastBar(ctx, {
+      x: this.x, y: this.y, radius: r,
+      castProgress: this._cast.progress,
+      castName: this._cast.name,
+    });
   }
 }

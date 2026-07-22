@@ -1,5 +1,7 @@
 // 레플리카 (복제) — M12s-P2a-Arena
-// TODO: 타임라인 구현
+
+import { BossClone } from '../core/BossClone.js';
+import { FanAoE }   from '../core/AoE.js';
 
 export const ARENA = 'img/M12s-P2a-Arena.png';
 
@@ -11,6 +13,16 @@ export const ARENA = 'img/M12s-P2a-Arena.png';
 //            180 = 남(아래)  270 = 서(왼쪽)
 //  dist  : 아레나 반지름 대비 비율  (0=중앙, 1=벽)
 // ═══════════════════════════════════════════════════════════════
+
+// 알파벳징 위치와 일치하는 보스 분신 정의
+// dist 0.663 = DEFAULT_PRESET ry≈0.215 기준 (중심에서 떨어진 거리 / arenaRadius)
+// facing : 분신이 중앙을 향하는 방향 (BossClone 기준 0=북, 시계방향 라디안)
+const BOSS_CLONE_DEFS = [
+  { label: 'A', angle:   0, dist: 0.663, facing: Math.PI       }, // 북 → 남(중앙)쪽
+  { label: 'B', angle:  90, dist: 0.663, facing: -Math.PI / 2  }, // 동 → 서(중앙)쪽
+  { label: 'C', angle: 180, dist: 0.663, facing: 0             }, // 남 → 북(중앙)쪽
+  { label: 'D', angle: 270, dist: 0.663, facing: Math.PI / 2   }, // 서 → 동(중앙)쪽
+];
 
 const SPREAD_POSITIONS = {
   T1: { angle: 327, dist: 0.39 },
@@ -46,21 +58,107 @@ function applyPositions(engine, posMap, duration) {
   engine.setPartyPositions(resolved, duration);
 }
 
+// 알파벳징 위치에 보스 분신 4개 생성
+// 바닥징이 실제로 찍혀 있으면 그 좌표를 우선 사용, 없으면 DEFAULT_PRESET 기준 polar 값
+// 반환값: { A, B, C, D } — 각 레이블에 해당하는 BossClone 참조
+function spawnBossClones(engine) {
+  const markerMap = engine.markerOverlay?.markers ?? {};
+  const cloneRadius = engine.tileSize * 1.5;
+  const map = {};
+
+  for (const { label, angle, dist, facing } of BOSS_CLONE_DEFS) {
+    const marker = markerMap[label];
+    const pos = marker ? { x: marker.x, y: marker.y } : polar(engine, angle, dist);
+    const clone = new BossClone(pos.x, pos.y, { label, facing, radius: cloneRadius });
+    engine.bossClones.push(clone);
+    map[label] = clone;
+  }
+
+  return map;
+}
+
+// 뱀발 후려차기 부채꼴 AoE 색상
+const SNAKE_KICK_COLORS = {
+  telegraphRGB:    '255,220,0',
+  explodeRGB:      '220,30,30',
+  telegraphStroke: '#ccaa00',
+  explodeStroke:   '#aa0000',
+};
+
+// 분신 위치에서 지정 방향으로 부채꼴 AoE 등록
+// canvasDir  : Math.atan2 기준 캔버스 각도 (0=동, -π/2=북, π=서, π/2=남)
+// angleDeg   : 부채꼴 전체 각도 (도)
+// telegraphMs: 전조 표시 시간 (= 캐스팅 잔여 30%)
+function spawnFanFromClone(engine, clone, canvasDir, angleDeg, telegraphMs) {
+  const half = (angleDeg / 2) * (Math.PI / 180);
+  // 클론은 이미 중심에서 떨어진 위치이므로 반대편 벽까지 닿으려면 ×2 필요
+  engine.aoes.push(new FanAoE({
+    x: clone.x, y: clone.y,
+    radius:     engine.arenaRadius * 2,
+    startAngle: canvasDir - half,
+    endAngle:   canvasDir + half,
+    delay:      telegraphMs,
+    duration:   500,
+    colors:     SNAKE_KICK_COLORS,
+  }));
+}
+
 // ── 타임라인 ─────────────────────────────────────────────────────
 
+// 뱀발 후려차기 파라미터 (조정 가능)
+const SNAKE_KICK_ANGLE_DEG  = 30;    // 부채꼴 전체 각도
+const SNAKE_KICK_CAST_MS    = 3000;  // 캐스팅 총 시간
+const SNAKE_KICK_AOE_AT     = 0.7;   // 캐스팅 진행률 몇 % 에서 전조 등장
+
 export function mechanicTick(engine) {
-  let elapsed     = 0;
-  let spreadDone  = false;
+  let elapsed      = 0;
+  let spreadDone   = false;
+  let castDone     = false;
+  let aoeDone      = false;
+  let clones       = null;   // { A, B, C, D }
+  let castPair     = null;        // ['A','C'] | ['B','D']
+  let castDirs     = null;        // 발사 방향 2개 [dir1, dir2]
+  let castStartMs  = 0;
 
   return (dt) => {
-    // AoE 스케줄 및 타임라인 로직을 여기에 추가
-
     elapsed += dt;
 
-    // 1,000ms 대기 → 1,000ms에 걸쳐 산개 이동
+    // t=1000ms : AI 산개 이동 + 보스 분신 4개 등장
     if (!spreadDone && elapsed >= 1000) {
       spreadDone = true;
       applyPositions(engine, SPREAD_POSITIONS, 1000);
+      clones = spawnBossClones(engine);
+    }
+
+    // t=2000ms : 분신 등장 1초 후, [A,C] 또는 [B,D] 랜덤 "뱀발 후려차기" 캐스팅
+    if (clones && !castDone && elapsed >= 2000) {
+      castDone    = true;
+      castStartMs = elapsed;
+
+      castPair = Math.random() < 0.5 ? ['A', 'C'] : ['B', 'D'];
+
+      // 좌우(동+서) 또는 위아래(북+남) 중 랜덤 — 쌍에 무관하게 동일
+      castDirs = Math.random() < 0.5
+        ? [0, Math.PI]             // 좌우 : 동(0) + 서(π)
+        : [-Math.PI / 2, Math.PI / 2]; // 위아래 : 북(-π/2) + 남(π/2)
+
+      for (const label of castPair) {
+        clones[label].startCast('뱀발 후려차기', SNAKE_KICK_CAST_MS);
+      }
+    }
+
+    // 캐스팅 70%: 부채꼴 전조 생성 (delay = 잔여 30% 시간)
+    if (castPair && !aoeDone) {
+      const castElapsed = elapsed - castStartMs;
+      if (castElapsed >= SNAKE_KICK_CAST_MS * SNAKE_KICK_AOE_AT) {
+        aoeDone = true;
+        const remainMs = SNAKE_KICK_CAST_MS * (1 - SNAKE_KICK_AOE_AT);
+        for (const label of castPair) {
+          for (const dir of castDirs) {
+            spawnFanFromClone(engine, clones[label], dir, SNAKE_KICK_ANGLE_DEG, remainMs);
+          }
+        }
+      }
     }
 
     // 1. 시작 1초후 ai 플레이어와 분신이 등장 및 이동
