@@ -92,7 +92,7 @@ const SNAKE_KICK_COLORS = {
 function spawnFanFromClone(engine, clone, canvasDir, angleDeg, telegraphMs) {
   const half = (angleDeg / 2) * (Math.PI / 180);
   // 클론은 이미 중심에서 떨어진 위치이므로 반대편 벽까지 닿으려면 ×2 필요
-  engine.aoes.push(new FanAoE({
+  const fan = new FanAoE({
     x: clone.x, y: clone.y,
     radius:     engine.arenaRadius * 2,
     startAngle: canvasDir - half,
@@ -100,7 +100,47 @@ function spawnFanFromClone(engine, clone, canvasDir, angleDeg, telegraphMs) {
     delay:      telegraphMs,
     duration:   500,
     colors:     SNAKE_KICK_COLORS,
-  }));
+  });
+  engine.aoes.push(fan);
+  return fan;
+}
+
+// 점(px, py)이 FanAoE 부채꼴 영역 안에 있는지 확인 (전조·착탄 구분 없음)
+function isInsideFan(px, py, fan) {
+  const dx = px - fan.x;
+  const dy = py - fan.y;
+  if (Math.sqrt(dx * dx + dy * dy) > fan.radius) return false;
+  let angle = Math.atan2(dy, dx);
+  while (angle < fan.startAngle) angle += Math.PI * 2;
+  return angle <= fan.endAngle + (fan.endAngle < fan.startAngle ? Math.PI * 2 : 0);
+}
+
+// 부채꼴 장판 위에 서 있는 AI 파티원을 중앙 기준 ±10도 회전하여 회피
+function dodgeFans(engine, fans) {
+  const cx = engine.canvas.width  / 2;
+  const cy = engine.canvas.height / 2;
+  const DODGE_RAD = 10 * Math.PI / 180;
+
+  for (const pm of engine.partyMembers) {
+    if (!pm.alive) continue;
+    const hitFan = fans.find(f => isInsideFan(pm.x, pm.y, f));
+    if (!hitFan) continue;
+
+    const dx = pm.x - cx;
+    const dy = pm.y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) continue;
+
+    // 팬 중심 방향 대비 플레이어 위치 → 반대 방향으로 10도 회전
+    const fanMid = (hitFan.startAngle + hitFan.endAngle) / 2;
+    let diff = Math.atan2(pm.y - hitFan.y, pm.x - hitFan.x) - fanMid;
+    while (diff >  Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+
+    const rotDir = diff >= 0 ? 1 : -1;
+    const newAngle = Math.atan2(dy, dx) + rotDir * DODGE_RAD;
+    pm.tweenTo(cx + dist * Math.cos(newAngle), cy + dist * Math.sin(newAngle), 400);
+  }
 }
 
 // ── 타임라인 ─────────────────────────────────────────────────────
@@ -159,11 +199,13 @@ export function mechanicTick(engine) {
       if (castElapsed >= SNAKE_KICK_CAST_MS * SNAKE_KICK_AOE_AT) {
         aoeDone = true;
         const remainMs = SNAKE_KICK_CAST_MS * (1 - SNAKE_KICK_AOE_AT);
+        const spawnedFans = [];
         for (const label of castPair) {
           for (const dir of castDirs) {
-            spawnFanFromClone(engine, clones[label], dir, SNAKE_KICK_ANGLE_DEG, remainMs);
+            spawnedFans.push(spawnFanFromClone(engine, clones[label], dir, SNAKE_KICK_ANGLE_DEG, remainMs));
           }
         }
+        dodgeFans(engine, spawnedFans);
       }
     }
     //   => 장판 생성위치를 보고 AI플레이어 안전지대로 임의 소량이동 (45도 각도중앙에 위치하면 안전지대되게 AOE임의설정)
