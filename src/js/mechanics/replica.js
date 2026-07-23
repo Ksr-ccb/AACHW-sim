@@ -171,7 +171,14 @@ export function mechanicTick(engine) {
   let castPair      = null;   // 뱀발 후려차기 담당 ['A','C'] | ['B','D']
   let otherPair     = null;   // 불/어둠 담당 나머지 두 분신
   let castDirs      = null;   // 발사 방향 2개 [dir1, dir2]
-  let castStartMs   = 0;
+  let castStartMs     = 0;
+  let bossRotStartMs  = 0;
+  let bossRotFrom     = 0;
+  let bossRotTo       = 0;
+  let bossRotDone     = false;
+  let bossCastDone    = false;
+  let bossAoeDone     = false;
+  let bossCastStartMs = 0;
 
   return (dt) => {
     elapsed += dt;
@@ -246,9 +253,17 @@ export function mechanicTick(engine) {
       flameClone.x = flameTarget.x;
       flameClone.y = flameTarget.y;
 
+      // 보스 회전 시작 (착탄과 동시에 1초간 랜덤 회전)
+      bossRotStartMs = elapsed;
+      bossRotFrom    = engine.boss.angle;
+      bossRotTo      = Math.random() * Math.PI * 2;
+
       // 바닥징(알파벳징) 크기 × 3
       const aoeR = Math.round(engine.canvas.width / 40 * 1.1 * 3);
 
+      // 4. 분신의 3초짜리 캐스팅바가 70프로 진행되었을 때, 불/어둠 대상자 선별종료
+      // 5. 분신의 3초짜리 캐스팅바가 종료되고 불/어둠 대상자에게 장판을 생성
+      //   => 불/어둠 장판을 2개이상 맞은 경우 바로 게임오버
       engine.aoes.push(new CircleAoE({
         x: flameTarget.x, y: flameTarget.y,
         radius: aoeR, delay: 0, duration: 1000,
@@ -266,11 +281,45 @@ export function mechanicTick(engine) {
       }
     }
 
-    //   => 장판 생성위치를 보고 AI플레이어 안전지대로 임의 소량이동 (45도 각도중앙에 위치하면 안전지대되게 AOE임의설정)
-    //   => TODO: AI플레이어 기본이동속도 조절
-    // 4. 분신의 3초짜리 캐스팅바가 70프로 진행되었을 때, 불/어둠 대상자 선별종료
-    // 5. 분신의 3초짜리 캐스팅바가 종료되고 불/어둠 대상자에게 장판을 생성
-    //   => 불/어둠 장판을 2개이상 맞은 경우 바로 게임오버
+    // 보스 회전 애니메이션 (착탄 동시에 시작, 1초간)
+    if (bossRotStartMs > 0 && !bossRotDone) {
+      const rElapsed = elapsed - bossRotStartMs;
+      if (rElapsed >= 500) {
+        engine.boss.setFacing(bossRotTo);
+        bossRotDone = true;
+      } else {
+        engine.boss.setFacing(bossRotFrom + (bossRotTo - bossRotFrom) * (rElapsed / 500));
+      }
+    }
+
+    // 회전 완료 + 0.5초 후: 보스 '뱀발 후려차기' 3초 캐스팅 시작
+    if (bossRotDone && !bossCastDone && elapsed >= bossRotStartMs + 1000) {
+      bossCastDone    = true;
+      bossCastStartMs = elapsed;
+      engine.boss.startCast('뱀발 후려차기', 2000);
+    }
+
+    // 캐스팅 70%: 보스 정면 180도 FanAoE 전조 생성
+    // boss.angle + π/2 = 실제 캔버스 방향 (ctx.rotate(angle - π) 후 위쪽 삼각형 기준)
+    if (bossCastDone && !bossAoeDone) {
+      const bossElapsed = elapsed - bossCastStartMs;
+      if (bossElapsed >= 2000 * 0.7) {
+        bossAoeDone = true;
+        const cx        = engine.canvas.width  / 2;
+        const cy        = engine.canvas.height / 2;
+        const canvasDir = engine.boss.angle + Math.PI / 2;
+        engine.aoes.push(new FanAoE({
+          x: cx, y: cy,
+          radius:     engine.arenaRadius,
+          startAngle: canvasDir - Math.PI / 2,
+          endAngle:   canvasDir + Math.PI / 2,
+          delay:      3000 * 0.3,
+          duration:   500,
+          colors:     SNAKE_KICK_COLORS,
+        }));
+      }
+    }
+
     //   => 장판 생성과 동시에 중앙에 있는 보스의 머리를 0~Math.PI만큼 랜덤이동 후 앞갈죽 캐스팅 3초시작
     //   TODO: 앞갈죽 장판을 생성하는 함수 제작
     // 6. 앞갈죽 장판 생성후 2초간 분신 분열
