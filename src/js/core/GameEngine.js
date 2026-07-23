@@ -27,6 +27,10 @@ export class GameEngine {
     this._rafId = null;
     this._mechanicTick = null;
     this.arenaRadiusRatio = 0.43;
+    this.debuffs = { flame: 0, dark: 0 };
+    const di = new Image(); di.src = 'img/reference/dark.png';
+    const fi = new Image(); fi.src = 'img/reference/flame.png';
+    this._debuffImgs = { dark: di, flame: fi };
   }
 
   get arenaRadius() {
@@ -67,6 +71,7 @@ export class GameEngine {
     this.aoes = [];
     this.gameOver = false;
     this.mechActive = false;
+    this.debuffs = { flame: 0, dark: 0 };
     this._mechanicTick = null;
     this.running = true;
     this.lastTime = null;
@@ -79,6 +84,7 @@ export class GameEngine {
     this.aoes = [];
     this.bossClones = [];
     this.playerReplicas = [];
+    this.debuffs = { flame: 0, dark: 0 };
     this.mechActive = true;
     this._mechanicTick = mechanicFn ? mechanicFn(this) : null;
   }
@@ -89,6 +95,7 @@ export class GameEngine {
     this.aoes = [];
     this.bossClones = [];
     this.playerReplicas = [];
+    this.debuffs = { flame: 0, dark: 0 };
     this.gameOver = false;
     const cx = this.canvas.width / 2;
     const cy = this.canvas.height / 2;
@@ -156,14 +163,25 @@ export class GameEngine {
 
       // 플레이어 피격
       for (const aoe of this.aoes) {
-        if (aoe.hitsPlayer(this.player)) { this.gameOver = true; break; }
+        if (!aoe.hitsPlayer(this.player)) continue;
+        if (aoe.type === 'flame' || aoe.type === 'dark') {
+          if (!aoe._hitPlayer) {
+            aoe._hitPlayer = true;
+            this.debuffs[aoe.type]++;
+            if (this.debuffs[aoe.type] >= 2) { this.gameOver = true; break; }
+          }
+        } else {
+          this.gameOver = true; break;
+        }
       }
 
-      // 파티원 피격 (오버레이 off여도 판정)
+      // 파티원 피격 (오버레이 off여도 판정) — flame/dark는 즉사 없음
       for (const pm of this.partyMembers) {
         if (!pm.alive) continue;
         for (const aoe of this.aoes) {
-          if (aoe.hitsPlayer(pm)) { pm.alive = false; break; }
+          if (aoe.hitsPlayer(pm) && aoe.type !== 'flame' && aoe.type !== 'dark') {
+            pm.alive = false; break;
+          }
         }
       }
 
@@ -194,6 +212,8 @@ export class GameEngine {
 
     this.player.draw(ctx);
 
+    this._drawDebuffs();
+
     if (this.gameOver) {
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -203,5 +223,26 @@ export class GameEngine {
       ctx.textBaseline = 'middle';
       ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2);
     }
+  }
+
+  _drawDebuffs() {
+    const { ctx, canvas, debuffs, _debuffImgs } = this;
+    if (debuffs.flame === 0 && debuffs.dark === 0) return;
+
+    const iconH = 108;
+    const pad   = 10;
+    const y     = canvas.height - pad - iconH;
+    let   x     = canvas.width  - pad;
+
+    const drawIcon = (img) => {
+      if (!img.complete || img.naturalWidth === 0) return;
+      const w = iconH * (img.naturalWidth / img.naturalHeight);
+      x -= w;
+      ctx.drawImage(img, x, y, w, iconH);
+      x -= pad;
+    };
+
+    if (debuffs.dark  > 0) drawIcon(_debuffImgs.dark);
+    if (debuffs.flame > 0) drawIcon(_debuffImgs.flame);
   }
 }

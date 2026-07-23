@@ -1,7 +1,7 @@
 // 레플리카 (복제) — M12s-P2a-Arena
 
 import { BossClone } from '../core/BossClone.js';
-import { FanAoE }   from '../core/AoE.js';
+import { FanAoE, CircleAoE } from '../core/AoE.js';
 
 export const ARENA = 'img/M12s-P2a-Arena.png';
 
@@ -85,6 +85,10 @@ const SNAKE_KICK_COLORS = {
   explodeStroke:   '#aa0000',
 };
 
+// 불/어둠 원형 AoE 색상 (즉시 착탄 = explode 색상만 사용)
+const FLAME_COLORS = { explodeRGB: '220,30,30', explodeStroke: '#aa0000' };
+const DARK_COLORS  = { explodeRGB: '220,30,30', explodeStroke: '#aa0000' };
+
 // 분신 위치에서 지정 방향으로 부채꼴 AoE 등록
 // canvasDir  : Math.atan2 기준 캔버스 각도 (0=동, -π/2=북, π=서, π/2=남)
 // angleDeg   : 부채꼴 전체 각도 (도)
@@ -143,6 +147,13 @@ function dodgeFans(engine, fans) {
   }
 }
 
+// 두 객체 간 거리 제곱 (타겟 정렬용)
+function dist2(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
 // ── 타임라인 ─────────────────────────────────────────────────────
 
 // 뱀발 후려차기 파라미터 (조정 가능)
@@ -151,14 +162,16 @@ const SNAKE_KICK_CAST_MS    = 3000;  // 캐스팅 총 시간
 const SNAKE_KICK_AOE_AT     = 0.7;   // 캐스팅 진행률 몇 % 에서 전조 등장
 
 export function mechanicTick(engine) {
-  let elapsed      = 0;
-  let spreadDone   = false;
-  let castDone     = false;
-  let aoeDone      = false;
-  let clones       = null;   // { A, B, C, D }
-  let castPair     = null;   // ['A','C'] | ['B','D']
-  let castDirs     = null;   // 발사 방향 2개 [dir1, dir2]
-  let castStartMs  = 0;
+  let elapsed       = 0;
+  let spreadDone    = false;
+  let castDone      = false;
+  let aoeDone       = false;
+  let flameDarkDone = false;
+  let clones        = null;   // { A, B, C, D }
+  let castPair      = null;   // 뱀발 후려차기 담당 ['A','C'] | ['B','D']
+  let otherPair     = null;   // 불/어둠 담당 나머지 두 분신
+  let castDirs      = null;   // 발사 방향 2개 [dir1, dir2]
+  let castStartMs   = 0;
 
   return (dt) => {
     elapsed += dt;
@@ -179,7 +192,8 @@ export function mechanicTick(engine) {
       castDone    = true;
       castStartMs = elapsed;
 
-      castPair = Math.random() < 0.5 ? ['A', 'C'] : ['B', 'D'];
+      castPair  = Math.random() < 0.5 ? ['A', 'C'] : ['B', 'D'];
+      otherPair = ['A', 'B', 'C', 'D'].filter(l => !castPair.includes(l));
 
       // 좌우(동+서) 또는 위아래(북+남) 중 랜덤 — 쌍에 무관하게 동일
       castDirs = Math.random() < 0.5
@@ -208,6 +222,50 @@ export function mechanicTick(engine) {
         dodgeFans(engine, spawnedFans);
       }
     }
+    // 5. t=5000ms (뱀발 캐스팅 종료): 불/어둠 착탄 + 불 분신 타겟 위치로 이동
+    if (clones && otherPair && !flameDarkDone && elapsed >= castStartMs + SNAKE_KICK_CAST_MS) {
+      flameDarkDone = true;
+
+      // 불/어둠 분신 랜덤 배정
+      const [lblA, lblB] = otherPair;
+      const flameLbl = Math.random() < 0.5 ? lblA : lblB;
+      const darkLbl  = flameLbl === lblA ? lblB : lblA;
+
+      const flameClone = clones[flameLbl];
+      const darkClone  = clones[darkLbl];
+
+      // 타겟 후보 (플레이어 포함 생존 파티원 전체)
+      const allPlayers = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
+      const byFlame = [...allPlayers].sort((a, b) => dist2(a, flameClone) - dist2(b, flameClone));
+      const byDark  = [...allPlayers].sort((a, b) => dist2(a, darkClone)  - dist2(b, darkClone));
+
+      const flameTarget = byFlame[0];
+      const darkTargets = byDark.slice(0, 2);
+
+      // 불 분신: 착탄 직전 타겟 위치로 이동
+      flameClone.x = flameTarget.x;
+      flameClone.y = flameTarget.y;
+
+      // 바닥징(알파벳징) 크기 × 3
+      const aoeR = Math.round(engine.canvas.width / 40 * 1.1 * 3);
+
+      engine.aoes.push(new CircleAoE({
+        x: flameTarget.x, y: flameTarget.y,
+        radius: aoeR, delay: 0, duration: 1000,
+        type: 'flame', colors: FLAME_COLORS,
+        icon: engine._debuffImgs.flame,
+      }));
+
+      for (const target of darkTargets) {
+        engine.aoes.push(new CircleAoE({
+          x: target.x, y: target.y,
+          radius: aoeR, delay: 0, duration: 1000,
+          type: 'dark', colors: DARK_COLORS,
+          icon: engine._debuffImgs.dark,
+        }));
+      }
+    }
+
     //   => 장판 생성위치를 보고 AI플레이어 안전지대로 임의 소량이동 (45도 각도중앙에 위치하면 안전지대되게 AOE임의설정)
     //   => TODO: AI플레이어 기본이동속도 조절
     // 4. 분신의 3초짜리 캐스팅바가 70프로 진행되었을 때, 불/어둠 대상자 선별종료
