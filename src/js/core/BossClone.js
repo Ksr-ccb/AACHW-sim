@@ -55,6 +55,6 @@ export class BossClone {
 
     ctx.restore();
 
-    drawCastBar(ctx, { x, y, radius, castProgress: this._cast.progress, castName: this._cast.name, scale: 0.7 });
+    drawCastBar(ctx, { x, y, radius, castProgress: this._cast.progress, castName: this._cast.name, scale: 1.0});
   }
 }

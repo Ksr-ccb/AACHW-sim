@@ -6,7 +6,7 @@ export class Boss {
     this.y = y;
     this.baseRadius = radius;
     // 방향각: 0 = 위(북쪽), PI/2 = 오른쪽, PI = 아래, -PI/2 = 왼쪽 (시계방향)
-    this.angle = 0;
+    this.angle = Math.PI;
     this.scale = 1.0;
     this.visible = true;
     this._cast = createCastState();

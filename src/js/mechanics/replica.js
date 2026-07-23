@@ -63,7 +63,7 @@ function applyPositions(engine, posMap, duration) {
 // 반환값: { A, B, C, D } — 각 레이블에 해당하는 BossClone 참조
 function spawnBossClones(engine) {
   const markerMap = engine.markerOverlay?.markers ?? {};
-  const cloneRadius = engine.tileSize * 1.5;
+  const cloneRadius = engine.tileSize * 1.2;
   const map = {};
 
   for (const { label, angle, dist, facing } of BOSS_CLONE_DEFS) {
@@ -123,6 +123,8 @@ export function mechanicTick(engine) {
   return (dt) => {
     elapsed += dt;
 
+
+    // 1. 시작 1초후 ai 플레이어와 분신이 등장 및 이동 [v]
     // t=1000ms : AI 산개 이동 + 보스 분신 4개 등장
     if (!spreadDone && elapsed >= 1000) {
       spreadDone = true;
@@ -130,6 +132,8 @@ export function mechanicTick(engine) {
       clones = spawnBossClones(engine);
     }
 
+    // 2, 시작 1.5초후 분신에게 3초짜리 캐스팅바가 시작함. [v]
+    //   => 이때 AC / BD 세트로 불,어둠 / 좌 혹은 우 부채꼴 AOE 장판 생성 결정
     // t=2000ms : 분신 등장 1초 후, [A,C] 또는 [B,D] 랜덤 "뱀발 후려차기" 캐스팅
     if (clones && !castDone && elapsed >= 2000) {
       castDone    = true;
@@ -146,8 +150,10 @@ export function mechanicTick(engine) {
         clones[label].startCast('뱀발 후려차기', SNAKE_KICK_CAST_MS);
       }
     }
-
+    //   TODO: 불,어둠 장판과 좌 혹은 우 부채꼴 장판 기능 함수 제작 (각 장판 디버프 생성, 불장판은 분신이동)
+    // 3. 분신의 3초짜리 캐스팅바가 70프로진행되었을 때, AOE장판의 경우 생성위치 미리 보여줌 [v]
     // 캐스팅 70%: 부채꼴 전조 생성 (delay = 잔여 30% 시간)
+    // 전조가 생김 동시에 ai 플레이어가 만약 자신이 장판위에 서잇다면 장판이없는 방향으로 10도 이동
     if (castPair && !aoeDone) {
       const castElapsed = elapsed - castStartMs;
       if (castElapsed >= SNAKE_KICK_CAST_MS * SNAKE_KICK_AOE_AT) {
@@ -160,13 +166,6 @@ export function mechanicTick(engine) {
         }
       }
     }
-
-    // 1. 시작 1초후 ai 플레이어와 분신이 등장 및 이동 [v]
-    // 2, 시작 1.5초후 분신에게 3초짜리 캐스팅바가 시작함. [v]
-    //   => 이때 AC / BD 세트로 불,어둠 / 좌 혹은 우 부채꼴 AOE 장판 생성 결정
-    //   TODO: 불,어둠 장판과 좌 혹은 우 부채꼴 장판 기능 함수 제작 (각 장판 디버프 생성, 불장판은 분신이동)
-    // 3. 분신의 3초짜리 캐스팅바가 70프로진행되었을 때, AOE장판의 경우 생성위치 미리 보여줌 [v]
-    //   TODO: AOE 전조와 착탄 차이를 색상 변경으로 표기(노랑->빨강) [v]
     //   => 장판 생성위치를 보고 AI플레이어 안전지대로 임의 소량이동 (45도 각도중앙에 위치하면 안전지대되게 AOE임의설정)
     //   => TODO: AI플레이어 기본이동속도 조절
     // 4. 분신의 3초짜리 캐스팅바가 70프로 진행되었을 때, 불/어둠 대상자 선별종료
