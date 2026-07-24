@@ -9,6 +9,7 @@ export class Boss {
     this.angle = Math.PI;
     this.scale = 1.0;
     this.visible = true;
+    this.image = null;
     this._cast = createCastState();
   }
 
@@ -36,15 +37,26 @@ export class Boss {
     ctx.save();
     ctx.translate(this.x, this.y);
 
-    // 몸통 원 (테두리만, 내부는 투명 — 향후 이미지 삽입 가능)
+    // 몸통 원 (테두리만)
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.strokeStyle = '#cc44ff';
     ctx.lineWidth = Math.max(2, r * 0.06);
     ctx.stroke();
 
-    // 머리 방향 표시 삼각형 (시계방향 각도 적용, 0 = 위)
+    // 머리 방향 표시 삼각형 + 이미지 — 같은 각도로 회전
     ctx.rotate(this.angle - Math.PI);
+
+    // 이미지 (원 안에 클리핑, 삼각형 방향으로 아래가 향함)
+    if (this.image) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.clip();
+      const ir = r * 0.8;
+      ctx.drawImage(this.image, -ir, -ir, ir * 2, ir * 2);
+      ctx.restore();
+    }
 
     const tipY   = -(r + r * 0.25);
     const baseY  =  -(r - r * 0.18);

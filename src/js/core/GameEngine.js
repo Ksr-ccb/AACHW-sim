@@ -31,6 +31,15 @@ export class GameEngine {
     const di = new Image(); di.src = 'img/reference/dark.png';
     const fi = new Image(); fi.src = 'img/reference/flame.png';
     this._debuffImgs = { dark: di, flame: fi };
+
+    // 보스 공통 이미지 — 한 번만 로드 후 boss/bossClone에 공유
+    this.bossImage = null;
+    const bi = new Image();
+    bi.src = 'img/reference/lindblum.png';
+    bi.onload = () => {
+      this.bossImage = bi;
+      if (this.boss) this.boss.image = bi;
+    };
   }
 
   get arenaRadius() {
@@ -63,6 +72,7 @@ export class GameEngine {
     this.player = new Player(cx, cy, 20, this.selectedRole);
     this.boss = new Boss(cx, cy, this.tileSize);
     this.boss.setScale(2.0);
+    if (this.bossImage) this.boss.image = this.bossImage;
 
     const partyRoles = ALL_ROLES.filter((r) => r !== this.selectedRole);
     this.partyMembers = partyRoles.map((r) => new PartyMember(r, cx, cy));

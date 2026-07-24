@@ -34,27 +34,38 @@ export class BossClone {
     ctx.translate(x, y);
     ctx.rotate(this.facing);
 
+    // 이미지 (육각형 안에 클리핑)
     if (this.image) {
-      const s = radius * 2;
-      ctx.drawImage(this.image, -radius, -radius, s, s);
-    } else {
-      // 육각형 본체
-      ctx.beginPath();
-      for (let i = 0; i < 6; i++) {
-        const a = (i * Math.PI) / 3 - Math.PI / 2;
-        if (i === 0) ctx.moveTo(Math.cos(a) * radius, Math.sin(a) * radius);
-        else         ctx.lineTo(Math.cos(a) * radius, Math.sin(a) * radius);
-      }
-      ctx.closePath();
+      ctx.save();
+      this._hexPath(ctx, radius);
+      ctx.clip();
+      const ir = radius * 0.8;
+      ctx.drawImage(this.image, -ir, -ir, ir * 2, ir * 2);
+      ctx.restore();
+    }
+
+    // 육각형 본체 — 이미지 있을 때는 채색 생략, 테두리는 항상
+    this._hexPath(ctx, radius);
+    if (!this.image) {
       ctx.fillStyle = 'rgba(55, 8, 95, 0.88)';
       ctx.fill();
-      ctx.strokeStyle = '#bb55ff';
-      ctx.lineWidth = 3;
-      ctx.stroke();
     }
+    ctx.strokeStyle = '#bb55ff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
 
     ctx.restore();
 
     drawCastBar(ctx, { x, y, radius, castProgress: this._cast.progress, castName: this._cast.name, scale: 1.0});
+  }
+
+  _hexPath(ctx, r) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (i * Math.PI) / 3 - Math.PI / 2;
+      if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      else         ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    ctx.closePath();
   }
 }
