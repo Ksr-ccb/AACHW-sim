@@ -53,6 +53,7 @@ export class Boss {
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, Math.PI * 2);
       ctx.clip();
+      ctx.rotate(Math.PI);
       const ir = r * 0.8;
       ctx.drawImage(this.image, -ir, -ir, ir * 2, ir * 2);
       ctx.restore();

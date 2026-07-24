@@ -10,9 +10,19 @@ export class BossClone {
     this.facing = facing;
     this.radius = radius;
     this.label  = label;   // 나중에 힌트용으로 활용 가능 (현재 미표시)
-    this.image  = null;    // 보스 이미지 교체용
+    this.image   = null;
     this.visible = true;
-    this._cast = createCastState();
+    this._cast   = createCastState();
+    this.targetX = x;
+    this.targetY = y;
+    this.speed   = 0;   // px/frame @60fps; 0 = 정지
+  }
+
+  // 목표 위치 + 이동 속도 설정 (speed=0 이면 즉시 이동 없음)
+  setTarget(x, y, speed = 0) {
+    this.targetX = x;
+    this.targetY = y;
+    this.speed   = speed;
   }
 
   // 캐스팅 시작: startCast(this, '기술명', 3000)
@@ -24,6 +34,21 @@ export class BossClone {
 
   update(dt) {
     updateCast(this._cast, dt);
+
+    if (this.speed > 0) {
+      const dx   = this.targetX - this.x;
+      const dy   = this.targetY - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 0.5) {
+        const step = Math.min(this.speed * (dt / 16), dist);
+        this.x += (dx / dist) * step;
+        this.y += (dy / dist) * step;
+      } else {
+        this.x = this.targetX;
+        this.y = this.targetY;
+        this.speed = 0;
+      }
+    }
   }
 
   draw(ctx) {

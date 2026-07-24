@@ -70,6 +70,7 @@ function spawnBossClones(engine) {
     const marker = markerMap[label];
     const pos = marker ? { x: marker.x, y: marker.y } : polar(engine, angle, dist);
     const clone = new BossClone(pos.x, pos.y, { label, facing, radius: cloneRadius });
+    if (engine.bossImage) clone.image = engine.bossImage;
     engine.bossClones.push(clone);
     map[label] = clone;
   }
@@ -147,6 +148,147 @@ function dodgeFans(engine, fans) {
   }
 }
 
+// 보스 FanAoE 전조 등장 시 파티원을 보스 뒤쪽으로 이동
+function dodgeBossFan(engine, bossFan) {
+  const cx      = engine.canvas.width  / 2;
+  const cy      = engine.canvas.height / 2;
+  const fanMid  = (bossFan.startAngle + bossFan.endAngle) / 2;
+  const backDir = fanMid + Math.PI;          // 삼각형 반대 방향
+  const dist    = engine.arenaRadius * 0.55;
+  const step    = (20 * Math.PI) / 180;     // 파티원 간 20도 간격
+
+  const alive = engine.partyMembers.filter(pm => pm.alive);
+  alive.forEach((pm, i) => {
+    const offset = (i - (alive.length - 1) / 2) * step;
+    pm.tweenTo(
+      cx + dist * Math.cos(backDir + offset),
+      cy + dist * Math.sin(backDir + offset),
+      800,
+    );
+  });
+}
+
+// 보스 뱀발 후려차기 종료 후 파티원을 보스 근처로 집결
+// T1 → 보스 머리 앞쪽, 나머지 → 보스 뒤쪽 근처 산개
+function movePartyToStack(engine) {
+  const cx        = engine.canvas.width  / 2;
+  const cy        = engine.canvas.height / 2;
+  const canvasDir = engine.boss.angle + Math.PI / 2;
+  const frontDist = engine.arenaRadius * 0.28;
+  const nearDist  = engine.arenaRadius * 0.20;
+  const step      = (28 * Math.PI) / 180;
+
+  const t1 = engine.partyMembers.find(pm => pm.role === 'T1' && pm.alive);
+  if (t1) {
+    t1.tweenTo(
+      cx + frontDist * Math.cos(canvasDir),
+      cy + frontDist * Math.sin(canvasDir),
+      1000,
+    );
+  }
+
+  const others = engine.partyMembers.filter(pm => pm.role !== 'T1' && pm.alive);
+  others.forEach((pm, i) => {
+    const off = (i - (others.length - 1) / 2) * step;
+    pm.tweenTo(
+      cx + nearDist * Math.cos(canvasDir + Math.PI + off),
+      cy + nearDist * Math.sin(canvasDir + Math.PI + off),
+      1000,
+    );
+  });
+}
+
+// 분신 분열: 각 클론을 facing 수직 방향으로 좌·우 1개씩 복제 후 원본 제거
+// 반환값: { AL, AR, BL, BR, CL, CR, DL, DR }
+function splitClones(engine, clonesMap) {
+  const cx        = engine.canvas.width  / 2;
+  const cy        = engine.canvas.height / 2;
+  const splitDist = engine.tileSize * 1.5;
+  const result    = {};
+
+  for (const [label, clone] of Object.entries(clonesMap)) {
+    const idx = engine.bossClones.indexOf(clone);
+    if (idx >= 0) engine.bossClones.splice(idx, 1);
+
+    // 클론→중심 방향의 수직(좌/우) 벡터
+    const dx = clone.x - cx;
+    const dy = clone.y - cy;
+    const d  = Math.sqrt(dx * dx + dy * dy);
+    const nx = dx / d;
+    const ny = dy / d;
+
+    for (const [suffix, ox, oy] of [['L', -ny, nx], ['R', ny, -nx]]) {
+      const c = new BossClone(
+        clone.x + ox * splitDist,
+        clone.y + oy * splitDist,
+        { label: label + suffix, facing: clone.facing, radius: clone.radius },
+      );
+      if (engine.bossImage) c.image = engine.bossImage;
+      engine.bossClones.push(c);
+      result[label + suffix] = c;
+    }
+  }
+
+  return result;
+}
+
+// 4개 분신을 대각선 2각도(angleA°, angleB°) × 소/대원에 배치
+// 규칙: 같은 쌍은 반드시 다른 각도; 각 각도에 소·대 각 1개
+// 반환: [{ clone, x, y }, ...] (속도 미적용, moveClonesToX에서 일괄 적용)
+function assignDiagonal(engine, fourClones, angleA, angleB) {
+  const [p1L, p1R] = [fourClones[0], fourClones[1]];
+  const [p2L, p2R] = [fourClones[2], fourClones[3]];
+
+  // 각 쌍에서 angleA 담당 랜덤 결정
+  const [p1a, p1b] = Math.random() < 0.5 ? [p1L, p1R] : [p1R, p1L];
+  const [p2a, p2b] = Math.random() < 0.5 ? [p2L, p2R] : [p2R, p2L];
+
+  // angleA 의 소/대 랜덤, angleB는 반전
+  const [sA, lA] = Math.random() < 0.5
+    ? [CLONE_RING_SMALL, CLONE_RING_LARGE]
+    : [CLONE_RING_LARGE, CLONE_RING_SMALL];
+  const [sB, lB] = Math.random() < 0.5
+    ? [CLONE_RING_SMALL, CLONE_RING_LARGE]
+    : [CLONE_RING_LARGE, CLONE_RING_SMALL];
+
+  return [
+    { clone: p1a, ...polar(engine, angleA, sA) },
+    { clone: p2a, ...polar(engine, angleA, lA) },
+    { clone: p1b, ...polar(engine, angleB, sB) },
+    { clone: p2b, ...polar(engine, angleB, lB) },
+  ];
+}
+
+// 8개 분열 분신을 X자 포지션으로 이동
+// - 뱀발세트/불어둠세트 → 각각 다른 대각선
+// - 모두 동일 속도(px/frame), 가장 먼 분신이 CLONE_X_MOVE_DURATION_S 초 만에 도착
+function moveClonesToX(engine, splitMap, castPair, otherPair) {
+  const snakeGroup = castPair.flatMap(l  => [splitMap[l  + 'L'], splitMap[l  + 'R']]).filter(Boolean);
+  const flameGroup = otherPair.flatMap(l => [splitMap[l  + 'L'], splitMap[l  + 'R']]).filter(Boolean);
+
+  const [snakeDiag, flameDiag] = Math.random() < 0.5
+    ? [[45, 225], [135, 315]]
+    : [[135, 315], [45, 225]];
+
+  const assignments = [
+    ...assignDiagonal(engine, snakeGroup, snakeDiag[0], snakeDiag[1]),
+    ...assignDiagonal(engine, flameGroup, flameDiag[0], flameDiag[1]),
+  ];
+
+  // 가장 먼 이동 거리 기준 속도 산출
+  let maxDist = 0;
+  for (const { clone, x, y } of assignments) {
+    const dx = x - clone.x;
+    const dy = y - clone.y;
+    maxDist = Math.max(maxDist, Math.sqrt(dx * dx + dy * dy));
+  }
+  const speed = maxDist > 0 ? maxDist / (CLONE_X_MOVE_DURATION_S * 60) : 1;
+
+  for (const { clone, x, y } of assignments) {
+    clone.setTarget(x, y, speed);
+  }
+}
+
 // 두 객체 간 거리 제곱 (타겟 정렬용)
 function dist2(a, b) {
   const dx = a.x - b.x;
@@ -160,6 +302,11 @@ function dist2(a, b) {
 const SNAKE_KICK_ANGLE_DEG  = 30;    // 부채꼴 전체 각도
 const SNAKE_KICK_CAST_MS    = 3000;  // 캐스팅 총 시간
 const SNAKE_KICK_AOE_AT     = 0.7;   // 캐스팅 진행률 몇 % 에서 전조 등장
+
+// 분열 후 X자 이동 파라미터 (조정 가능)
+const CLONE_RING_SMALL        = 0.39;  // 아레나 반지름 대비 작은원 거리
+const CLONE_RING_LARGE        = 0.80;  // 아레나 반지름 대비 큰원 거리
+const CLONE_X_MOVE_DURATION_S = 2.0;  // 가장 먼 분신 기준 이동 시간(초)
 
 export function mechanicTick(engine) {
   let elapsed       = 0;
@@ -179,6 +326,12 @@ export function mechanicTick(engine) {
   let bossCastDone    = false;
   let bossAoeDone     = false;
   let bossCastStartMs = 0;
+  let stackDone       = false;   // 뱀발 후 파티원 집결
+  let flashStartMs    = 0;       // 분신 반짝임 시작 시각
+  let splitDone       = false;   // 분신 분열 완료
+  let splitTimeMs     = 0;       // 분열 완료 시각
+  let splitClonesMap  = null;    // 분열된 분신들
+  let moveXDone       = false;   // X자 이동 시작
 
   return (dt) => {
     elapsed += dt;
@@ -292,23 +445,23 @@ export function mechanicTick(engine) {
       }
     }
 
-    // 회전 완료 + 0.5초 후: 보스 '뱀발 후려차기' 3초 캐스팅 시작
-    if (bossRotDone && !bossCastDone && elapsed >= bossRotStartMs + 1000) {
+    // 회전 완료 + 1초 후: 보스 '뱀발 후려차기' 3초 캐스팅 시작
+    if (bossRotDone && !bossCastDone && elapsed >= bossRotStartMs + 1500) {
       bossCastDone    = true;
       bossCastStartMs = elapsed;
-      engine.boss.startCast('뱀발 후려차기', 2000);
+      engine.boss.startCast('뱀발 후려차기', 3000);
     }
 
-    // 캐스팅 70%: 보스 정면 180도 FanAoE 전조 생성
+    // 캐스팅 70%: 보스 정면 180도 FanAoE 전조 생성 + 파티원 뒤로 회피
     // boss.angle + π/2 = 실제 캔버스 방향 (ctx.rotate(angle - π) 후 위쪽 삼각형 기준)
     if (bossCastDone && !bossAoeDone) {
       const bossElapsed = elapsed - bossCastStartMs;
-      if (bossElapsed >= 2000 * 0.7) {
+      if (bossElapsed >= 3000 * 0.7) {
         bossAoeDone = true;
         const cx        = engine.canvas.width  / 2;
         const cy        = engine.canvas.height / 2;
         const canvasDir = engine.boss.angle + Math.PI / 2;
-        engine.aoes.push(new FanAoE({
+        const bossFan   = new FanAoE({
           x: cx, y: cy,
           radius:     engine.arenaRadius,
           startAngle: canvasDir - Math.PI / 2,
@@ -316,13 +469,45 @@ export function mechanicTick(engine) {
           delay:      3000 * 0.3,
           duration:   500,
           colors:     SNAKE_KICK_COLORS,
-        }));
+        });
+        engine.aoes.push(bossFan);
+        dodgeBossFan(engine, bossFan);
       }
     }
 
-    //   => 장판 생성과 동시에 중앙에 있는 보스의 머리를 0~Math.PI만큼 랜덤이동 후 앞갈죽 캐스팅 3초시작
-    //   TODO: 앞갈죽 장판을 생성하는 함수 제작
-    // 6. 앞갈죽 장판 생성후 2초간 분신 분열
+    // 6. 보스 뱀발 종료 → 파티원 보스 근처로 집결 (T1은 머리 앞)
+    if (bossCastDone && !stackDone && elapsed >= bossCastStartMs + 3000) {
+      stackDone = true;
+      movePartyToStack(engine);
+    }
+
+    // 7. 집결 3초 후 분신 반짝임 시작
+    if (stackDone && flashStartMs === 0 && elapsed >= bossCastStartMs + 6000) {
+      flashStartMs = elapsed;
+    }
+
+    // 분신 반짝임 애니메이션 (100ms 주기, 0.5초간)
+    if (flashStartMs > 0 && !splitDone) {
+      const fElapsed = elapsed - flashStartMs;
+      const phase    = Math.floor(fElapsed / 100) % 2;
+      for (const clone of engine.bossClones) clone.visible = phase === 0;
+
+      // 0.5초 후 분열
+      if (fElapsed >= 500) {
+        splitDone    = true;
+        splitTimeMs  = elapsed;
+        for (const clone of engine.bossClones) clone.visible = true;
+        splitClonesMap = splitClones(engine, clones);
+      }
+    }
+
+    // 9. 분열 완료 2초 후 → X자 포지션으로 이동 (동일 속도)
+    if (splitDone && !moveXDone && elapsed >= splitTimeMs + 2000) {
+      moveXDone = true;
+      moveClonesToX(engine, splitClonesMap, castPair, otherPair);
+    }
+
+    // 8. 앞갈죽 장판 생성후 2초간 분신 분열
     //   => 분열기준은 원래 분신이 있던 자리에서 좌우로 1타일반큼 떨어진거리에 같은 속성의 분신 2개씩 생성
     // 7. 분신 분열 후 2초대기 후 야바위 (야바위 자리이동 1초)
     //   => 어둠과 불은 x 자 기준 같은 직선상에서 어둠/불 교차 생성해야함.
