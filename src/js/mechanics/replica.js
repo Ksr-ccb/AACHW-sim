@@ -2,6 +2,7 @@
 
 import { BossClone } from '../core/BossClone.js';
 import { FanAoE, CircleAoE } from '../core/AoE.js';
+import { createTankBuster } from './tankBuster.js';
 
 export const ARENA = 'img/M12s-P2a-Arena.png';
 
@@ -492,30 +493,10 @@ export function mechanicTick(engine) {
   let outerDarkRPos       = null;
   let outerFlamePairRoles = null;  // 외부 불조 역할 배열 [role, role]
   let outerFlamePairPos   = null;  // 외부 불조가 서는 알파벳징 위치
-  // 이중 뒤돌려차기 시퀀스
-  let cloneFlashMs      = 0;
-  let clonesDespawned   = false;
-  let finalCastDone     = false;
-  let finalCastStartMs  = 0;
-  let finalFanDir       = 0;      // 보스 정면 canvas 방향 (rad)
-  let finalKickFan      = null;   // 탱버 FanAoE 참조
-  let finalAoeSpawned   = false;
-  let finalHitChecked   = false;
-  // 보스 랜덤 회전 + 뱀발 + 근접장판 + T1/T2 산개 시퀀스
-  let postRotStartMs    = 0;
-  let postRotFrom       = 0;
-  let postRotTo         = 0;
-  let postRotDone       = false;
-  let postPreMoveDone   = false;  // 뱀발 대기 중 AI 선배치
-  let postKickFired     = false;
-  let postKickStartMs   = 0;
-  let postKickFanDir    = 0;      // 뱀발 발동 시 boss 정면 방향
-  let postKickFanRef    = null;
-  let postKickChecked   = false;
-  let postSpreadDone    = false;  // T1·T2 산개 이동 시작
-  let postCirclesDone   = false;
-  let postCircleChecked = false;
-  let postCircleAoes    = [];
+  // 분신 번쩍임 + 탱버 시퀀스
+  let cloneFlashMs    = 0;
+  let clonesDespawned = false;
+  let tankBuster      = null;    // createTankBuster() 인스턴스
 
   return (dt) => {
     elapsed += dt;
@@ -837,245 +818,14 @@ export function mechanicTick(engine) {
         for (const cl of Object.values(splitClonesMap)) if (cl) cl.visible = phase === 0;
       }
       if (fE >= 500) {
-        clonesDespawned  = true;
+        clonesDespawned   = true;
         engine.bossClones = [];
-
-        // 보스를 T1 방향으로 회전
-        const cx  = engine.canvas.width  / 2;
-        const cy  = engine.canvas.height / 2;
-        const t1  = [engine.player, ...engine.partyMembers].find(p => p?.role === 'T1');
-        finalFanDir = t1
-          ? Math.atan2(t1.y - cy, t1.x - cx)
-          : engine.boss.angle + Math.PI / 2;
-        engine.boss.setFacing(finalFanDir - Math.PI / 2);
-
-        // 이중 뒤돌려차기 4초 캐스팅 시작
-        finalCastDone    = true;
-        finalCastStartMs = elapsed;
-        engine.boss.startCast('이중 뒤돌려차기', 4000);
+        tankBuster        = createTankBuster(engine);
+        tankBuster.start();
       }
     }
 
-    // 탱버 캐스팅 70%: 전조 생성 + AI 파티원 이동 (T1·T2 보스 앞, 나머지 뒤)
-    if (finalCastDone && !finalAoeSpawned) {
-      const fE = elapsed - finalCastStartMs;
-      if (fE >= 4000 * 0.7) {
-        finalAoeSpawned = true;
-
-        const cx       = engine.canvas.width  / 2;
-        const cy       = engine.canvas.height / 2;
-        const remainMs = 4000 * 0.3;  // 1200ms
-
-        // 전조 FanAoE — noAutoKill: 탱커 맞아도 즉사 방지 (기믹 코드에서 직접 처리)
-        finalKickFan = new FanAoE({
-          x: cx, y: cy,
-          radius:     engine.arenaRadius,
-          startAngle: finalFanDir - Math.PI / 2,
-          endAngle:   finalFanDir + Math.PI / 2,
-          delay:    remainMs,
-          duration: 500,
-          colors:   SNAKE_KICK_COLORS,
-          noAutoKill: true,
-        });
-        engine.aoes.push(finalKickFan);
-
-        // AI 이동 — 1000ms 이내 완료 (착탄 200ms 전)
-        const travelMs  = 1000;
-        const frontDist = engine.arenaRadius * 0.22;
-        const backDist  = engine.arenaRadius * 0.30;
-        const humanRole = engine.selectedRole;
-        const step      = (22 * Math.PI) / 180;
-
-        const t1Pm = engine.partyMembers.find(pm => pm.role === 'T1' && pm.alive);
-        const t2Pm = engine.partyMembers.find(pm => pm.role === 'T2' && pm.alive);
-        if (t1Pm && t1Pm.role !== humanRole) {
-          t1Pm.tweenTo(
-            cx + frontDist * Math.cos(finalFanDir),
-            cy + frontDist * Math.sin(finalFanDir),
-            travelMs,
-          );
-        }
-        if (t2Pm && t2Pm.role !== humanRole) {
-          t2Pm.tweenTo(
-            cx + frontDist * Math.cos(finalFanDir + 0.35),
-            cy + frontDist * Math.sin(finalFanDir + 0.35),
-            travelMs,
-          );
-        }
-        const others = engine.partyMembers.filter(
-          pm => pm.alive && pm.role !== 'T1' && pm.role !== 'T2' && pm.role !== humanRole,
-        );
-        others.forEach((pm, i) => {
-          const off = (i - (others.length - 1) / 2) * step;
-          pm.tweenTo(
-            cx + backDist * Math.cos(finalFanDir + Math.PI + off),
-            cy + backDist * Math.sin(finalFanDir + Math.PI + off),
-            travelMs,
-          );
-        });
-      }
-    }
-
-    // 탱버 착탄: T1·T2 제외한 플레이어가 범위 내이면 게임오버
-    if (finalKickFan?.isExploding && !finalHitChecked) {
-      finalHitChecked = true;
-      const tankRoles = new Set(['T1', 'T2']);
-      const allP = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
-      for (const p of allP) {
-        if (tankRoles.has(p.role)) continue;
-        if (finalKickFan.hitsPlayer(p)) {
-          if (p === engine.player) engine.gameOver = true;
-          else p.alive = false;
-        }
-      }
-    }
-
-    // ── 보스 랜덤 회전 + 뱀발 + 근접장판 + T1/T2 산개 ──────────────
-
-    // 탱버 착탄 직후: 보스 랜덤 회전 시작 (90·180·270·360° 중 랜덤, 1초)
-    if (finalHitChecked && postRotStartMs === 0) {
-      postRotStartMs = elapsed;
-      postRotFrom    = engine.boss.angle;
-      const rotAmounts = [Math.PI / 2, Math.PI, 3 * Math.PI / 2, 2 * Math.PI];
-      postRotTo = postRotFrom + rotAmounts[Math.floor(Math.random() * 4)];
-    }
-
-    // 회전 애니메이션 (1초)
-    if (postRotStartMs > 0 && !postRotDone) {
-      const rE = elapsed - postRotStartMs;
-      if (rE >= 1000) {
-        engine.boss.setFacing(postRotTo);
-        postRotDone = true;
-      } else {
-        engine.boss.setFacing(postRotFrom + (postRotTo - postRotFrom) * (rE / 1000));
-      }
-    }
-
-    // 회전 완료 즉시: AI 파티원 전원 보스 뒤로 이동 (T1·T2 포함 / 3초 대기 동안 이동)
-    if (postRotDone && !postPreMoveDone) {
-      postPreMoveDone = true;
-      const cx        = engine.canvas.width  / 2;
-      const cy        = engine.canvas.height / 2;
-      const fDir      = postRotTo + Math.PI / 2;
-      const backD     = engine.arenaRadius * 0.30;
-      const humanRole = engine.selectedRole;
-      const step      = (22 * Math.PI) / 180;
-      const travelMs  = 2500;
-
-      engine.partyMembers
-        .filter(pm => pm.alive && pm.role !== humanRole)
-        .forEach((pm, i, arr) => {
-          const off = (i - (arr.length - 1) / 2) * step;
-          pm.tweenTo(cx + backD * Math.cos(fDir + Math.PI + off), cy + backD * Math.sin(fDir + Math.PI + off), travelMs);
-        });
-    }
-
-    // 회전 후 3초 → 뱀발 후려차기 즉시 발동 (전조 500ms, 폭발 500ms)
-    if (postRotDone && !postKickFired && elapsed >= postRotStartMs + 1000 + 3000) {
-      postKickFired   = true;
-      postKickStartMs = elapsed;
-      const cx      = engine.canvas.width  / 2;
-      const cy      = engine.canvas.height / 2;
-      postKickFanDir = engine.boss.angle + Math.PI / 2;
-
-      postKickFanRef = new FanAoE({
-        x: cx, y: cy,
-        radius:     engine.arenaRadius,
-        startAngle: postKickFanDir - Math.PI / 2,
-        endAngle:   postKickFanDir + Math.PI / 2,
-        delay:      500,
-        duration:   500,
-        colors:     SNAKE_KICK_COLORS,
-        noAutoKill: true,
-      });
-      engine.aoes.push(postKickFanRef);
-    }
-
-    // 뱀발 착탄 시: T1·T2 외에 전방에 있으면 게임오버
-    if (postKickFanRef?.isExploding && !postKickChecked) {
-      postKickChecked = true;
-      const tankRoles2 = new Set(['T1', 'T2']);
-      const allP2 = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
-      for (const p of allP2) {
-        if (tankRoles2.has(p.role)) continue;
-        if (postKickFanRef.hitsPlayer(p)) {
-          if (p === engine.player) engine.gameOver = true;
-          else p.alive = false;
-        }
-      }
-    }
-
-    // 뱀발 전조 등장(500ms) 후: T1·T2 산개 이동 (보스 전방 기준 왼쪽/오른쪽 dist=0.55)
-    // 나머지 파티원은 보스 뒤로 유지
-    if (postKickFired && !postSpreadDone && elapsed >= postKickStartMs + 500) {
-      postSpreadDone  = true;
-      const cx        = engine.canvas.width  / 2;
-      const cy        = engine.canvas.height / 2;
-      const fDir      = postKickFanDir;
-      const spreadD   = engine.arenaRadius * 0.55;
-      const spreadAng = Math.PI / 4;   // ±45° → 전방 180° 내 유지
-      const backD     = engine.arenaRadius * 0.30;
-      const humanRole = engine.selectedRole;
-      const step      = (22 * Math.PI) / 180;
-      const travelMs  = 2000;
-
-      const t1Pm = engine.partyMembers.find(pm => pm.role === 'T1' && pm.alive);
-      const t2Pm = engine.partyMembers.find(pm => pm.role === 'T2' && pm.alive);
-      if (t1Pm && t1Pm.role !== humanRole)
-        t1Pm.tweenTo(cx + spreadD * Math.cos(fDir - spreadAng), cy + spreadD * Math.sin(fDir - spreadAng), travelMs);
-      if (t2Pm && t2Pm.role !== humanRole)
-        t2Pm.tweenTo(cx + spreadD * Math.cos(fDir + spreadAng), cy + spreadD * Math.sin(fDir + spreadAng), travelMs);
-      engine.partyMembers
-        .filter(pm => pm.alive && pm.role !== 'T1' && pm.role !== 'T2' && pm.role !== humanRole)
-        .forEach((pm, i, arr) => {
-          const off = (i - (arr.length - 1) / 2) * step;
-          pm.tweenTo(cx + backD * Math.cos(fDir + Math.PI + off), cy + backD * Math.sin(fDir + Math.PI + off), travelMs);
-        });
-    }
-
-    // 뱀발 실행 후 3초: 보스 전방 180° 내 가장 가까운 2명에게 대형 원 착탄
-    if (postKickFired && !postCirclesDone && elapsed >= postKickStartMs + 3000) {
-      postCirclesDone = true;
-      const cx    = engine.canvas.width  / 2;
-      const cy    = engine.canvas.height / 2;
-      const fDir  = postKickFanDir;
-      const bigR  = Math.round(engine.canvas.width / 40 * 1.1 * 3) * 2;
-
-      const allP3  = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
-      const frontP = allP3.filter(p => {
-        let diff = Math.atan2(p.y - cy, p.x - cx) - fDir;
-        while (diff >  Math.PI) diff -= 2 * Math.PI;
-        while (diff < -Math.PI) diff += 2 * Math.PI;
-        return Math.abs(diff) <= Math.PI / 2;
-      }).sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
-
-      for (const t of frontP.slice(0, 2)) {
-        const c = new CircleAoE({
-          x: t.x, y: t.y,
-          radius: bigR,
-          delay: 0, duration: 1500,
-          type: null,
-          noAutoKill: true,
-        });
-        engine.aoes.push(c);
-        postCircleAoes.push(c);
-      }
-    }
-
-    // 근접 원 착탄 판정: T1·T2 외 플레이어가 범위 내이면 게임오버
-    if (postCircleAoes.length > 0 && !postCircleChecked) {
-      if (postCircleAoes.some(c => c.isExploding)) {
-        postCircleChecked = true;
-        const tankRoles3 = new Set(['T1', 'T2']);
-        const allP4 = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
-        for (const p of allP4) {
-          if (tankRoles3.has(p.role)) continue;
-          if (postCircleAoes.some(c => c.hitsPlayer(p))) {
-            if (p === engine.player) engine.gameOver = true;
-            else p.alive = false;
-          }
-        }
-      }
-    }
+    // 탱버 + 랜덤 회전 + 뱀발 + 산개 + 원 — tankBuster 가 내부 상태를 모두 관리
+    tankBuster?.tick(dt);
   };
 }
