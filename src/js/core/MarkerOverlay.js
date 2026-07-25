@@ -56,11 +56,12 @@ export class MarkerOverlay {
   draw(ctx) {
     if (!this.visible || Object.keys(this.markers).length === 0) return;
 
-    const size = Math.round(this.canvas.width / 30);
+    const baseSize = Math.round(this.canvas.width / 40);
     ctx.save();
 
     for (const [type, pos] of Object.entries(this.markers)) {
       const { shape, color } = MARKER_CONFIG[type];
+      const size = shape === 'circle' ? Math.round(baseSize * 1.1) : baseSize;
 
       ctx.globalAlpha = 0.5;
       ctx.fillStyle = color;

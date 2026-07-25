@@ -6,7 +6,7 @@ export class Player {
     this.y = y;
     this.radius = radius;
     this.role = role;
-    this.speed = 4;
+    this.speed = 3;
     this.keys = new Set();
 
     this._onKeyDown = (e) => {
