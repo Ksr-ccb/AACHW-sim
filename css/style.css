@@ -84,6 +84,283 @@ textarea {
    Author's custom styles
    ========================================================================== */
 
+body {
+  margin: 0;
+  background: #1a1a1a;
+  color: #eee;
+  font-family: sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* ── 상단 바 (기믹 탭 + 시작·초기화) ─────────── */
+#top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+#mechanic-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.mech-btn {
+  padding: 6px 16px;
+  background: #333;
+  color: #ccc;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.mech-btn:hover { background: #444; }
+
+.mech-btn.active {
+  background: #5555cc;
+  color: #fff;
+  border-color: #7777ee;
+}
+
+/* ── 시작 / 초기화 ───────────────────────────── */
+#controls {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  border-left: 1px solid #444;
+  padding-left: 12px;
+}
+
+#btn-start {
+  padding: 7px 24px;
+  background: #2a7a2a;
+  color: #fff;
+  border: 1px solid #3d9e3d;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+#btn-start:hover { background: #358c35; }
+
+#btn-reset {
+  padding: 7px 20px;
+  background: #555;
+  color: #ccc;
+  border: 1px solid #777;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+#btn-reset:hover { background: #666; }
+
+/* ── 파티 바 (역할 선택 + 파티원 토글) ──────── */
+#party-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 6px 12px;
+  background: rgba(30,30,30,0.8);
+  border: 1px solid #444;
+  border-radius: 6px;
+}
+
+.party-bar-label {
+  font-size: 12px;
+  color: #888;
+  flex-shrink: 0;
+}
+
+#role-selector {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.role-btn {
+  padding: 4px 10px;
+  background: #2a2a2a;
+  border: 2px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  color: #ccc;
+  min-width: 36px;
+  text-align: center;
+}
+
+.role-btn:hover { background: #383838; }
+
+.role-btn.tank        { border-color: #336699; color: #88bbff; }
+.role-btn.tank:hover  { background: #1a2a3a; }
+.role-btn.tank.active { background: #1a3a5a; border-color: #4488ff; color: #ffffff; box-shadow: 0 0 0 1px #4488ff; }
+
+.role-btn.healer        { border-color: #336633; color: #88cc88; }
+.role-btn.healer:hover  { background: #1a2a1a; }
+.role-btn.healer.active { background: #1a4a1a; border-color: #44cc44; color: #ffffff; box-shadow: 0 0 0 1px #44cc44; }
+
+.role-btn.dps        { border-color: #663333; color: #ff8888; }
+.role-btn.dps:hover  { background: #2a1a1a; }
+.role-btn.dps.active { background: #4a1a1a; border-color: #ff4444; color: #ffffff; box-shadow: 0 0 0 1px #ff4444; }
+
+#btn-party-toggle {
+  padding: 4px 12px;
+  background: #333;
+  color: #aaa;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+#btn-party-toggle:hover { background: #444; color: #fff; }
+
+/* ── 바닥징 패널 (캔버스 위 overlay) ────────── */
+#marker-panel {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  background: rgba(18, 18, 18, 0.88);
+  border: 1px solid #555;
+  border-radius: 6px;
+  overflow: hidden;
+  min-width: 160px;
+}
+
+#btn-marker-panel-toggle {
+  width: 100%;
+  padding: 7px 14px;
+  background: #2a2a2a;
+  color: #ccc;
+  border: none;
+  border-bottom: 1px solid #444;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  text-align: left;
+}
+
+#btn-marker-panel-toggle:hover { background: #333; color: #fff; }
+#btn-marker-panel-toggle.collapsed { border-bottom: none; }
+
+#marker-panel-body {
+  display: grid;
+  grid-template-columns: repeat(4, 32px);
+  gap: 5px;
+  padding: 8px 14px;
+}
+
+#marker-panel-body.collapsed { display: none; }
+
+#marker-toolbar { display: contents; }
+
+/* ── 마커 버튼 ───────────────────────────────── */
+.marker-btn {
+  width: 32px;
+  height: 32px;
+  background: #333;
+  border: 2px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.marker-btn[data-marker="A"],
+.marker-btn[data-marker="1"] { border-color: #ff4444; color: #ff4444; }
+
+.marker-btn[data-marker="B"],
+.marker-btn[data-marker="2"] { border-color: #ffdd00; color: #ffdd00; }
+
+.marker-btn[data-marker="C"],
+.marker-btn[data-marker="3"] { border-color: #4488ff; color: #4488ff; }
+
+.marker-btn[data-marker="D"],
+.marker-btn[data-marker="4"] { border-color: #cc44ff; color: #cc44ff; }
+
+.marker-btn[data-marker="A"],
+.marker-btn[data-marker="B"],
+.marker-btn[data-marker="C"],
+.marker-btn[data-marker="D"] { border-radius: 50%; }
+
+.marker-btn:hover { background: #444; }
+.marker-btn.active { background: #3a3a3a; box-shadow: 0 0 0 2px #fff; }
+
+/* ── 기본 프리셋 / 전체 지우기 / 숨기기 ─────── */
+#btn-marker-preset {
+  grid-column: span 4;
+  padding: 5px 0;
+  background: #2a3a5a;
+  color: #7aadff;
+  border: 1px solid #3a5a8a;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+#btn-marker-preset:hover { background: #334d7a; color: #aaccff; }
+
+#btn-marker-clear,
+#btn-marker-toggle {
+  grid-column: span 2;
+  padding: 5px 0;
+  background: #333;
+  color: #aaa;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#btn-marker-clear:hover,
+#btn-marker-toggle:hover { background: #444; color: #fff; }
+
+/* ── 캔버스 ──────────────────────────────────── */
+#canvas-container {
+  position: relative;
+  line-height: 0;
+}
+
+#arena-canvas {
+  max-width: 90vw;
+  max-height: 80vh;
+  display: block;
+}
+
+#hint {
+  margin: 0;
+  color: #888;
+  font-size: 13px;
+}
+
 /* ==========================================================================
    Helper classes
    ========================================================================== */
