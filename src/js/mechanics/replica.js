@@ -259,12 +259,33 @@ function assignDiagonal(engine, fourClones, angleA, angleB) {
   ];
 }
 
+// 불/어둠 4개 분신을 대각선 2각도에 배치 (타입 교차 규칙 적용)
+// 규칙: 같은 타입은 반드시 다른 원 → 불이 angleA 소원이면 angleB는 대원, 어둠은 반전
+function assignFlameGroup(engine, flamePair, darkPair, angleA, angleB) {
+  const [fA, fB] = Math.random() < 0.5 ? flamePair : [flamePair[1], flamePair[0]];
+  const [dA, dB] = Math.random() < 0.5 ? darkPair  : [darkPair[1],  darkPair[0]];
+
+  const [ringFA, ringFB] = Math.random() < 0.5
+    ? [CLONE_RING_SMALL, CLONE_RING_LARGE]
+    : [CLONE_RING_LARGE, CLONE_RING_SMALL];
+  const ringDA = ringFA === CLONE_RING_SMALL ? CLONE_RING_LARGE : CLONE_RING_SMALL;
+  const ringDB = ringFB === CLONE_RING_SMALL ? CLONE_RING_LARGE : CLONE_RING_SMALL;
+
+  return [
+    { clone: fA, ...polar(engine, angleA, ringFA) },
+    { clone: dA, ...polar(engine, angleA, ringDA) },
+    { clone: fB, ...polar(engine, angleB, ringFB) },
+    { clone: dB, ...polar(engine, angleB, ringDB) },
+  ];
+}
+
 // 8개 분열 분신을 X자 포지션으로 이동
 // - 뱀발세트/불어둠세트 → 각각 다른 대각선
 // - 모두 동일 속도(px/frame), 가장 먼 분신이 CLONE_X_MOVE_DURATION_S 초 만에 도착
-function moveClonesToX(engine, splitMap, castPair, otherPair) {
-  const snakeGroup = castPair.flatMap(l  => [splitMap[l  + 'L'], splitMap[l  + 'R']]).filter(Boolean);
-  const flameGroup = otherPair.flatMap(l => [splitMap[l  + 'L'], splitMap[l  + 'R']]).filter(Boolean);
+function moveClonesToX(engine, splitMap, castPair, flameLbl, darkLbl) {
+  const snakeGroup = castPair.flatMap(l => [splitMap[l + 'L'], splitMap[l + 'R']]).filter(Boolean);
+  const flamePair  = [splitMap[flameLbl + 'L'], splitMap[flameLbl + 'R']].filter(Boolean);
+  const darkPair   = [splitMap[darkLbl  + 'L'], splitMap[darkLbl  + 'R']].filter(Boolean);
 
   const [snakeDiag, flameDiag] = Math.random() < 0.5
     ? [[45, 225], [135, 315]]
@@ -272,7 +293,7 @@ function moveClonesToX(engine, splitMap, castPair, otherPair) {
 
   const assignments = [
     ...assignDiagonal(engine, snakeGroup, snakeDiag[0], snakeDiag[1]),
-    ...assignDiagonal(engine, flameGroup, flameDiag[0], flameDiag[1]),
+    ...assignFlameGroup(engine, flamePair, darkPair, flameDiag[0], flameDiag[1]),
   ];
 
   // 가장 먼 이동 거리 기준 속도 산출
@@ -317,6 +338,8 @@ export function mechanicTick(engine) {
   let clones        = null;   // { A, B, C, D }
   let castPair      = null;   // 뱀발 후려차기 담당 ['A','C'] | ['B','D']
   let otherPair     = null;   // 불/어둠 담당 나머지 두 분신
+  let flameLbl      = null;   // 불 분신 레이블
+  let darkLbl       = null;   // 어둠 분신 레이블
   let castDirs      = null;   // 발사 방향 2개 [dir1, dir2]
   let castStartMs     = 0;
   let bossRotStartMs  = 0;
@@ -331,7 +354,12 @@ export function mechanicTick(engine) {
   let splitDone       = false;   // 분신 분열 완료
   let splitTimeMs     = 0;       // 분열 완료 시각
   let splitClonesMap  = null;    // 분열된 분신들
-  let moveXDone       = false;   // X자 이동 시작
+  let moveXDone            = false;  // X자 이동 시작
+  let moveXTimeMs          = 0;      // X자 이동 시작 시각
+  let repeat2CastDone      = false;
+  let repeat2CastStartMs   = 0;
+  let repeat2AoeDone       = false;
+  let repeat2FlameDarkDone = false;
 
   return (dt) => {
     elapsed += dt;
@@ -386,10 +414,10 @@ export function mechanicTick(engine) {
     if (clones && otherPair && !flameDarkDone && elapsed >= castStartMs + SNAKE_KICK_CAST_MS) {
       flameDarkDone = true;
 
-      // 불/어둠 분신 랜덤 배정
+      // 불/어둠 분신 랜덤 배정 (클로저에 저장해 moveClonesToX에서 재사용)
       const [lblA, lblB] = otherPair;
-      const flameLbl = Math.random() < 0.5 ? lblA : lblB;
-      const darkLbl  = flameLbl === lblA ? lblB : lblA;
+      flameLbl = Math.random() < 0.5 ? lblA : lblB;
+      darkLbl  = flameLbl === lblA ? lblB : lblA;
 
       const flameClone = clones[flameLbl];
       const darkClone  = clones[darkLbl];
@@ -503,8 +531,76 @@ export function mechanicTick(engine) {
 
     // 9. 분열 완료 2초 후 → X자 포지션으로 이동 (동일 속도)
     if (splitDone && !moveXDone && elapsed >= splitTimeMs + 2000) {
-      moveXDone = true;
-      moveClonesToX(engine, splitClonesMap, castPair, otherPair);
+      moveXDone   = true;
+      moveXTimeMs = elapsed;
+      moveClonesToX(engine, splitClonesMap, castPair, flameLbl, darkLbl);
+    }
+
+    // 10. X자 이동 완료(2초) + 대기(2초) 후 → 2회차 뱀발 후려차기 캐스팅
+    if (moveXDone && !repeat2CastDone && elapsed >= moveXTimeMs + CLONE_X_MOVE_DURATION_S * 1000 + 2000) {
+      repeat2CastDone    = true;
+      repeat2CastStartMs = elapsed;
+      for (const label of castPair) {
+        for (const suffix of ['L', 'R']) {
+          splitClonesMap[label + suffix]?.startCast('뱀발 후려차기', SNAKE_KICK_CAST_MS);
+        }
+      }
+    }
+
+    // 2회차 캐스팅 70%: 전조 등장 + AI 회피 (castDirs 재사용 = 맵 기준 동일 방향)
+    if (repeat2CastDone && !repeat2AoeDone) {
+      const r2Elapsed = elapsed - repeat2CastStartMs;
+      if (r2Elapsed >= SNAKE_KICK_CAST_MS * SNAKE_KICK_AOE_AT) {
+        repeat2AoeDone = true;
+        const remainMs = SNAKE_KICK_CAST_MS * (1 - SNAKE_KICK_AOE_AT);
+        const spawnedFans = [];
+        for (const label of castPair) {
+          for (const suffix of ['L', 'R']) {
+            const clone = splitClonesMap[label + suffix];
+            if (!clone) continue;
+            for (const dir of castDirs) {
+              spawnedFans.push(spawnFanFromClone(engine, clone, dir, SNAKE_KICK_ANGLE_DEG, remainMs));
+            }
+          }
+        }
+        dodgeFans(engine, spawnedFans);
+      }
+    }
+
+    // 2회차 캐스팅 종료: 불/어둠 착탄 (분열된 각 분신이 독립적으로 실행)
+    if (repeat2CastDone && !repeat2FlameDarkDone && elapsed >= repeat2CastStartMs + SNAKE_KICK_CAST_MS) {
+      repeat2FlameDarkDone = true;
+      const allPlayers = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
+      const aoeR = Math.round(engine.canvas.width / 40 * 1.1 * 3);
+
+      for (const suffix of ['L', 'R']) {
+        const flameClone = splitClonesMap[flameLbl + suffix];
+        if (flameClone) {
+          const byDist = [...allPlayers].sort((a, b) => dist2(a, flameClone) - dist2(b, flameClone));
+          const target = byDist[0];
+          flameClone.x = target.x;
+          flameClone.y = target.y;
+          engine.aoes.push(new CircleAoE({
+            x: target.x, y: target.y,
+            radius: aoeR, delay: 0, duration: 1000,
+            type: 'flame', colors: FLAME_COLORS,
+            icon: engine._debuffImgs.flame,
+          }));
+        }
+
+        const darkClone = splitClonesMap[darkLbl + suffix];
+        if (darkClone) {
+          const byDist = [...allPlayers].sort((a, b) => dist2(a, darkClone) - dist2(b, darkClone));
+          for (const target of byDist.slice(0, 2)) {
+            engine.aoes.push(new CircleAoE({
+              x: target.x, y: target.y,
+              radius: aoeR, delay: 0, duration: 1000,
+              type: 'dark', colors: DARK_COLORS,
+              icon: engine._debuffImgs.dark,
+            }));
+          }
+        }
+      }
     }
 
     // 8. 앞갈죽 장판 생성후 2초간 분신 분열
