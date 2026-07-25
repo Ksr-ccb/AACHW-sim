@@ -121,13 +121,15 @@ function isInsideFan(px, py, fan) {
 }
 
 // 부채꼴 장판 위에 서 있는 AI 파티원을 중앙 기준 ±10도 회전하여 회피
-function dodgeFans(engine, fans) {
+// excludeRoles: Set<string> — 포함된 역할은 건너뜀 (알파벳징 유지 필요 조 등)
+function dodgeFans(engine, fans, excludeRoles = null) {
   const cx = engine.canvas.width  / 2;
   const cy = engine.canvas.height / 2;
   const DODGE_RAD = 10 * Math.PI / 180;
 
   for (const pm of engine.partyMembers) {
     if (!pm.alive) continue;
+    if (excludeRoles?.has(pm.role)) continue;
     const hitFan = fans.find(f => isInsideFan(pm.x, pm.y, f));
     if (!hitFan) continue;
 
@@ -271,11 +273,12 @@ function assignFlameGroup(engine, flamePair, darkPair, angleA, angleB) {
   const ringDA = ringFA === CLONE_RING_SMALL ? CLONE_RING_LARGE : CLONE_RING_SMALL;
   const ringDB = ringFB === CLONE_RING_SMALL ? CLONE_RING_LARGE : CLONE_RING_SMALL;
 
+  const toRing = r => r === CLONE_RING_SMALL ? 'small' : 'large';
   return [
-    { clone: fA, ...polar(engine, angleA, ringFA) },
-    { clone: dA, ...polar(engine, angleA, ringDA) },
-    { clone: fB, ...polar(engine, angleB, ringFB) },
-    { clone: dB, ...polar(engine, angleB, ringDB) },
+    { clone: fA, ...polar(engine, angleA, ringFA), type: 'flame', ring: toRing(ringFA), angle: angleA },
+    { clone: dA, ...polar(engine, angleA, ringDA), type: 'dark',  ring: toRing(ringDA), angle: angleA },
+    { clone: fB, ...polar(engine, angleB, ringFB), type: 'flame', ring: toRing(ringFB), angle: angleB },
+    { clone: dB, ...polar(engine, angleB, ringDB), type: 'dark',  ring: toRing(ringDB), angle: angleB },
   ];
 }
 
@@ -308,6 +311,7 @@ function moveClonesToX(engine, splitMap, castPair, flameLbl, darkLbl) {
   for (const { clone, x, y } of assignments) {
     clone.setTarget(x, y, speed);
   }
+  return assignments;  // type / ring / angle 메타데이터 포함
 }
 
 // 두 객체 간 거리 제곱 (타겟 정렬용)
@@ -317,17 +321,127 @@ function dist2(a, b) {
   return dx * dx + dy * dy;
 }
 
+// ── 안전지대 포지션 헬퍼 ───────────────────────────────────────
+
+const ANGLE_TO_ALPHA = { 0: 'A', 90: 'B', 180: 'C', 270: 'D' };
+const ANGLE_TO_NUM   = { 0: '1', 90: '2', 180: '3', 270: '4' };
+
+// 해당 cardinal 각도의 알파벳징 위치 (마커 오버레이 우선, 없으면 극좌표 계산)
+function getAlphaMarkerPos(engine, angle) {
+  const a      = Math.round(((angle % 360) + 360) % 360);
+  const label  = ANGLE_TO_ALPHA[a];
+  const placed = label ? (engine.markerOverlay?.markers?.[label]) : null;
+  return placed ?? polar(engine, a, ALPHA_MARKER_DIST_RATIO);
+}
+
+// 해당 cardinal 각도의 숫자징 위치
+function getNumMarkerPos(engine, angle) {
+  const a      = Math.round(((angle % 360) + 360) % 360);
+  const label  = ANGLE_TO_NUM[a];
+  const placed = label ? (engine.markerOverlay?.markers?.[label]) : null;
+  return placed ?? polar(engine, a, NUM_MARKER_DIST_RATIO);
+}
+
+// 정사각형 마커에서 target 방향 꼭지점 위치
+function getCornerToward(markerPos, targetPos, size) {
+  return {
+    x: markerPos.x + Math.sign(targetPos.x - markerPos.x) * size,
+    y: markerPos.y + Math.sign(targetPos.y - markerPos.y) * size,
+  };
+}
+
+// 뱀발 장판 범위 내에 있는 마커 위치를 안전 방향으로 이동 (마커 내부 이탈 금지)
+function findSafePosInMarker(markerPos, fans, size, cx, cy) {
+  if (!fans.some(f => isInsideFan(markerPos.x, markerPos.y, f))) return markerPos;
+
+  const dx = markerPos.x - cx;
+  const dy = markerPos.y - cy;
+  const d  = Math.sqrt(dx * dx + dy * dy) || 1;
+  const nx = dx / d, ny = dy / d;
+
+  for (const [ox, oy] of [[nx, ny], [-nx, -ny], [-ny, nx], [ny, -nx]]) {
+    const p = { x: markerPos.x + ox * size, y: markerPos.y + oy * size };
+    if (!fans.some(f => isInsideFan(p.x, p.y, f))) return p;
+  }
+  return markerPos;
+}
+
+// AI 파티원을 2회차 안전지대로 이동
+// 반환: { outerH, outerD, odLPos, odRPos } — fan dodge 에서 재사용
+function positionSafeZones(engine, {
+  innerFlameAngle, innerDarkAngle, outerFlameAngle, outerDarkAngle,
+  innerDarkHitPair, outerDarkHitPair, innerDarkCl,
+}) {
+  const markerSize = Math.round(engine.canvas.width / 40);
+  const travelMs   = 1800;
+  const posMap     = {};
+
+  // ── 내부조 (T1,T2,D1,D2) ────────────────────────────────────
+  const innerFlamePair = innerDarkHitPair === 'T1D1' ? ['T1', 'D1'] : ['T2', 'D2'];
+  const innerDarkPair  = innerDarkHitPair === 'T1D1' ? ['T2', 'D2'] : ['T1', 'D1'];
+
+  // 불쉐어: 두 명이 innerFlameAngle 방향 dist INNER_FLAME_SHARE_DIST 지점에 겹침
+  const flameSharePos = polar(engine, innerFlameAngle, INNER_FLAME_SHARE_DIST);
+  for (const role of innerFlamePair) posMap[role] = flameSharePos;
+
+  // 어둠산개: 내부 어둠 분신 양옆 숫자징 꼭지점 (왼쪽=D, 오른쪽=T)
+  // 꼭지점 = "분신에서 먼 변 × 중앙에서 가까운 변"의 교점
+  //   = 분신이 아레나 중앙 기준 NE에 있으면 모든 숫자징에서 SW 꼭지점
+  //   = offset(-sign(cloneX - cx), -sign(cloneY - cy)) * size
+  const mLAngle = ((innerDarkAngle - 45) + 360) % 360;
+  const mRAngle = (innerDarkAngle + 45) % 360;
+  const mLPos   = getNumMarkerPos(engine, mLAngle);
+  const mRPos   = getNumMarkerPos(engine, mRAngle);
+  const dClPos  = { x: innerDarkCl.targetX, y: innerDarkCl.targetY };
+  const arCx    = engine.canvas.width  / 2;
+  const arCy    = engine.canvas.height / 2;
+  const cOffX   = -Math.sign(dClPos.x - arCx) * markerSize;
+  const cOffY   = -Math.sign(dClPos.y - arCy) * markerSize;
+  posMap[innerDarkPair.find(r => r.startsWith('D'))] = { x: mLPos.x + cOffX, y: mLPos.y + cOffY };
+  posMap[innerDarkPair.find(r => r.startsWith('T'))] = { x: mRPos.x + cOffX, y: mRPos.y + cOffY };
+
+  // ── 외부조 (H1,H2,D3,D4) ────────────────────────────────────
+  const outerFlamePair = outerDarkHitPair === 'H1D3' ? ['H1', 'D3'] : ['H2', 'D4'];
+  const outerDarkPair  = outerDarkHitPair === 'H1D3' ? ['H2', 'D4'] : ['H1', 'D3'];
+
+  // 불쉐어: 불 분신을 중앙에서 바라볼 때 왼쪽 알파벳징 (시계반대 45°)
+  const outerFLPos = getAlphaMarkerPos(engine, (outerFlameAngle - 45 + 360) % 360);
+  for (const role of outerFlamePair) posMap[role] = outerFLPos;
+
+  // 어둠산개: 어둠 분신 양옆 알파벳징 (왼쪽=H, 오른쪽=D)
+  const odLPos = getAlphaMarkerPos(engine, (outerDarkAngle - 45 + 360) % 360);
+  const odRPos = getAlphaMarkerPos(engine, (outerDarkAngle + 45) % 360);
+  const outerH = outerDarkPair.find(r => r.startsWith('H'));
+  const outerD = outerDarkPair.find(r => r.startsWith('D'));
+  posMap[outerH] = odLPos;
+  posMap[outerD] = odRPos;
+
+  // AI 파티원만 이동
+  const humanRole = engine.selectedRole;
+  for (const pm of engine.partyMembers) {
+    const pos = posMap[pm.role];
+    if (pos && pm.role !== humanRole && pm.alive) pm.tweenTo(pos.x, pos.y, travelMs);
+  }
+
+  return { outerH, outerD, odLPos, odRPos, outerFlamePair, outerFLPos };
+}
+
 // ── 타임라인 ─────────────────────────────────────────────────────
 
 // 뱀발 후려차기 파라미터 (조정 가능)
-const SNAKE_KICK_ANGLE_DEG  = 30;    // 부채꼴 전체 각도
+const SNAKE_KICK_ANGLE_DEG  = 29;    // 부채꼴 전체 각도
 const SNAKE_KICK_CAST_MS    = 3000;  // 캐스팅 총 시간
 const SNAKE_KICK_AOE_AT     = 0.7;   // 캐스팅 진행률 몇 % 에서 전조 등장
 
 // 분열 후 X자 이동 파라미터 (조정 가능)
-const CLONE_RING_SMALL        = 0.39;  // 아레나 반지름 대비 작은원 거리
-const CLONE_RING_LARGE        = 0.80;  // 아레나 반지름 대비 큰원 거리
+const CLONE_RING_SMALL        = 0.30;  // 아레나 반지름 대비 작은원 거리
+const CLONE_RING_LARGE        = 0.675;  // 아레나 반지름 대비 큰원 거리
 const CLONE_X_MOVE_DURATION_S = 2.0;  // 가장 먼 분신 기준 이동 시간(초)
+
+// 안전지대 포지션 파라미터 (조정 가능)
+const INNER_FLAME_SHARE_DIST  = 0.1;  // 내부 불쉐어 위치 (중앙 마름모 변, 값 조정 가능)
+const NUM_MARKER_DIST_RATIO   = 0.388; // 숫자징 거리 비율
+const ALPHA_MARKER_DIST_RATIO = 0.663; // 알파벳징 거리 비율
 
 export function mechanicTick(engine) {
   let elapsed       = 0;
@@ -360,6 +474,48 @@ export function mechanicTick(engine) {
   let repeat2CastStartMs   = 0;
   let repeat2AoeDone       = false;
   let repeat2FlameDarkDone = false;
+  // 2회차 안전지대 배치용
+  let innerFlameCl      = null;  // 작은원 불 분신
+  let innerDarkCl       = null;  // 작은원 어둠 분신
+  let outerFlameCl      = null;  // 큰원 불 분신 (미사용, 확장 여지)
+  let outerDarkCl       = null;  // 큰원 어둠 분신 (미사용, 확장 여지)
+  let innerFlameAngle   = null;
+  let innerDarkAngle    = null;
+  let outerFlameAngle   = null;
+  let outerDarkAngle    = null;
+  let innerDarkHitPair  = null;  // 1회차 어둠 맞은 내부 조: 'T1D1' | 'T2D2'
+  let outerDarkHitPair  = null;  // 1회차 어둠 맞은 외부 조: 'H1D3' | 'H2D4'
+  let safePossDone      = false;
+  let outerDarkLRole      = null;
+  let outerDarkRRole      = null;
+  let outerDarkLPos       = null;
+  let outerDarkRPos       = null;
+  let outerFlamePairRoles = null;  // 외부 불조 역할 배열 [role, role]
+  let outerFlamePairPos   = null;  // 외부 불조가 서는 알파벳징 위치
+  // 이중 뒤돌려차기 시퀀스
+  let cloneFlashMs      = 0;
+  let clonesDespawned   = false;
+  let finalCastDone     = false;
+  let finalCastStartMs  = 0;
+  let finalFanDir       = 0;      // 보스 정면 canvas 방향 (rad)
+  let finalKickFan      = null;   // 탱버 FanAoE 참조
+  let finalAoeSpawned   = false;
+  let finalHitChecked   = false;
+  // 보스 랜덤 회전 + 뱀발 + 근접장판 + T1/T2 산개 시퀀스
+  let postRotStartMs    = 0;
+  let postRotFrom       = 0;
+  let postRotTo         = 0;
+  let postRotDone       = false;
+  let postPreMoveDone   = false;  // 뱀발 대기 중 AI 선배치
+  let postKickFired     = false;
+  let postKickStartMs   = 0;
+  let postKickFanDir    = 0;      // 뱀발 발동 시 boss 정면 방향
+  let postKickFanRef    = null;
+  let postKickChecked   = false;
+  let postSpreadDone    = false;  // T1·T2 산개 이동 시작
+  let postCirclesDone   = false;
+  let postCircleChecked = false;
+  let postCircleAoes    = [];
 
   return (dt) => {
     elapsed += dt;
@@ -429,6 +585,17 @@ export function mechanicTick(engine) {
 
       const flameTarget = byFlame[0];
       const darkTargets = byDark.slice(0, 2);
+
+      // 1회차 어둠 피격 조 추적 → 2회차 배치 분류
+      const innerSet = new Set(['T1', 'T2', 'D1', 'D2']);
+      const outerSet = new Set(['H1', 'H2', 'D3', 'D4']);
+      for (const t of darkTargets) {
+        if (!t.role) continue;
+        if (innerSet.has(t.role) && !innerDarkHitPair)
+          innerDarkHitPair = (t.role === 'T1' || t.role === 'D1') ? 'T1D1' : 'T2D2';
+        if (outerSet.has(t.role) && !outerDarkHitPair)
+          outerDarkHitPair = (t.role === 'H1' || t.role === 'D3') ? 'H1D3' : 'H2D4';
+      }
 
       // 불 분신: 착탄 직전 타겟 위치로 이동
       flameClone.x = flameTarget.x;
@@ -533,10 +700,18 @@ export function mechanicTick(engine) {
     if (splitDone && !moveXDone && elapsed >= splitTimeMs + 2000) {
       moveXDone   = true;
       moveXTimeMs = elapsed;
-      moveClonesToX(engine, splitClonesMap, castPair, flameLbl, darkLbl);
+      const xAssign = moveClonesToX(engine, splitClonesMap, castPair, flameLbl, darkLbl);
+      // 불/어둠 분신의 링·각도 기록 (안전지대 계산용)
+      for (const item of xAssign) {
+        if (!item.type) continue;
+        if (item.type === 'flame' && item.ring === 'small') { innerFlameCl = item.clone; innerFlameAngle = item.angle; }
+        if (item.type === 'dark'  && item.ring === 'small') { innerDarkCl  = item.clone; innerDarkAngle  = item.angle; }
+        if (item.type === 'flame' && item.ring === 'large') { outerFlameCl = item.clone; outerFlameAngle = item.angle; }
+        if (item.type === 'dark'  && item.ring === 'large') { outerDarkCl  = item.clone; outerDarkAngle  = item.angle; }
+      }
     }
 
-    // 10. X자 이동 완료(2초) + 대기(2초) 후 → 2회차 뱀발 후려차기 캐스팅
+    // 10. X자 이동 완료(2초) + 대기(2초) 후 → 2회차 뱀발 후려차기 캐스팅 + 안전지대 이동
     if (moveXDone && !repeat2CastDone && elapsed >= moveXTimeMs + CLONE_X_MOVE_DURATION_S * 1000 + 2000) {
       repeat2CastDone    = true;
       repeat2CastStartMs = elapsed;
@@ -544,6 +719,22 @@ export function mechanicTick(engine) {
         for (const suffix of ['L', 'R']) {
           splitClonesMap[label + suffix]?.startCast('뱀발 후려차기', SNAKE_KICK_CAST_MS);
         }
+      }
+      // 안전지대 이동 (어둠 피격 정보가 충분한 경우에만)
+      if (!safePossDone && innerFlameAngle != null && innerDarkAngle != null
+          && outerFlameAngle != null && outerDarkAngle != null
+          && innerDarkHitPair && outerDarkHitPair) {
+        safePossDone = true;
+        const result = positionSafeZones(engine, {
+          innerFlameAngle, innerDarkAngle, outerFlameAngle, outerDarkAngle,
+          innerDarkHitPair, outerDarkHitPair, innerDarkCl,
+        });
+        outerDarkLRole      = result.outerH;
+        outerDarkRRole      = result.outerD;
+        outerDarkLPos       = result.odLPos;
+        outerDarkRPos       = result.odRPos;
+        outerFlamePairRoles = result.outerFlamePair;
+        outerFlamePairPos   = result.outerFLPos;
       }
     }
 
@@ -563,7 +754,34 @@ export function mechanicTick(engine) {
             }
           }
         }
-        dodgeFans(engine, spawnedFans);
+        // 외부조(H1,H2,D3,D4)는 알파벳징을 이탈하면 안 되므로 dodgeFans 제외
+        const outerGroupExclude = new Set(['H1', 'H2', 'D3', 'D4']);
+        dodgeFans(engine, spawnedFans, outerGroupExclude);
+
+        const mSize = Math.round(engine.canvas.width / 40);
+        const cx    = engine.canvas.width  / 2;
+        const cy    = engine.canvas.height / 2;
+
+        // 외부 어둠조: 각자 알파벳징 내부 안전위치로 미세 조정
+        if (outerDarkLPos && outerDarkLRole) {
+          const safe = findSafePosInMarker(outerDarkLPos, spawnedFans, mSize, cx, cy);
+          const pm   = engine.partyMembers.find(p => p.role === outerDarkLRole && p.alive);
+          if (pm) pm.tweenTo(safe.x, safe.y, 400);
+        }
+        if (outerDarkRPos && outerDarkRRole) {
+          const safe = findSafePosInMarker(outerDarkRPos, spawnedFans, mSize, cx, cy);
+          const pm   = engine.partyMembers.find(p => p.role === outerDarkRRole && p.alive);
+          if (pm) pm.tweenTo(safe.x, safe.y, 400);
+        }
+
+        // 외부 불조: 공유 알파벳징 내부 안전위치로 미세 조정
+        if (outerFlamePairPos && outerFlamePairRoles) {
+          const safe = findSafePosInMarker(outerFlamePairPos, spawnedFans, mSize, cx, cy);
+          for (const role of outerFlamePairRoles) {
+            const pm = engine.partyMembers.find(p => p.role === role && p.alive);
+            if (pm) pm.tweenTo(safe.x, safe.y, 400);
+          }
+        }
       }
     }
 
@@ -603,15 +821,261 @@ export function mechanicTick(engine) {
       }
     }
 
-    // 8. 앞갈죽 장판 생성후 2초간 분신 분열
-    //   => 분열기준은 원래 분신이 있던 자리에서 좌우로 1타일반큼 떨어진거리에 같은 속성의 분신 2개씩 생성
-    // 7. 분신 분열 후 2초대기 후 야바위 (야바위 자리이동 1초)
-    //   => 어둠과 불은 x 자 기준 같은 직선상에서 어둠/불 교차 생성해야함.
-    //   TODO: 공략에 맞는 자리 미세조정 필요
-    // 8. 야바위 자리 이동 후 3초대기
-    // 9. 야바위 자리 이동 후 1초 대기 후 AI플레이어 각자 자리로 이동(디폴트 속도로 이동(멀면2초, 가까우면1초))
-    //   TODO: 샤갈 얘네 움직이는 로직언제다짬(역할별 근딜/원딜/탱커/힐러 분신위치기준 RADIUS와 RADIAN값 조정)
-    // 10. 분신 캐스팅시작 2초
-    // 11. 착탄( TODO: 3.매커니즘 유지 )
+    // ── 이중 뒤돌려차기 시퀀스 ────────────────────────────────────
+
+    // 2회차 착탄 2초 후: 분신 번쩍임 시작
+    if (repeat2FlameDarkDone && cloneFlashMs === 0
+        && elapsed >= repeat2CastStartMs + SNAKE_KICK_CAST_MS + 2000) {
+      cloneFlashMs = elapsed;
+    }
+
+    // 번쩍임 애니메이션(100ms 주기) → 500ms 후 분신 전원 제거 + 보스 회전 + 탱버 캐스팅 시작
+    if (cloneFlashMs > 0 && !clonesDespawned) {
+      const fE    = elapsed - cloneFlashMs;
+      const phase = Math.floor(fE / 100) % 2;
+      if (splitClonesMap) {
+        for (const cl of Object.values(splitClonesMap)) if (cl) cl.visible = phase === 0;
+      }
+      if (fE >= 500) {
+        clonesDespawned  = true;
+        engine.bossClones = [];
+
+        // 보스를 T1 방향으로 회전
+        const cx  = engine.canvas.width  / 2;
+        const cy  = engine.canvas.height / 2;
+        const t1  = [engine.player, ...engine.partyMembers].find(p => p?.role === 'T1');
+        finalFanDir = t1
+          ? Math.atan2(t1.y - cy, t1.x - cx)
+          : engine.boss.angle + Math.PI / 2;
+        engine.boss.setFacing(finalFanDir - Math.PI / 2);
+
+        // 이중 뒤돌려차기 4초 캐스팅 시작
+        finalCastDone    = true;
+        finalCastStartMs = elapsed;
+        engine.boss.startCast('이중 뒤돌려차기', 4000);
+      }
+    }
+
+    // 탱버 캐스팅 70%: 전조 생성 + AI 파티원 이동 (T1·T2 보스 앞, 나머지 뒤)
+    if (finalCastDone && !finalAoeSpawned) {
+      const fE = elapsed - finalCastStartMs;
+      if (fE >= 4000 * 0.7) {
+        finalAoeSpawned = true;
+
+        const cx       = engine.canvas.width  / 2;
+        const cy       = engine.canvas.height / 2;
+        const remainMs = 4000 * 0.3;  // 1200ms
+
+        // 전조 FanAoE — noAutoKill: 탱커 맞아도 즉사 방지 (기믹 코드에서 직접 처리)
+        finalKickFan = new FanAoE({
+          x: cx, y: cy,
+          radius:     engine.arenaRadius,
+          startAngle: finalFanDir - Math.PI / 2,
+          endAngle:   finalFanDir + Math.PI / 2,
+          delay:    remainMs,
+          duration: 500,
+          colors:   SNAKE_KICK_COLORS,
+          noAutoKill: true,
+        });
+        engine.aoes.push(finalKickFan);
+
+        // AI 이동 — 1000ms 이내 완료 (착탄 200ms 전)
+        const travelMs  = 1000;
+        const frontDist = engine.arenaRadius * 0.22;
+        const backDist  = engine.arenaRadius * 0.30;
+        const humanRole = engine.selectedRole;
+        const step      = (22 * Math.PI) / 180;
+
+        const t1Pm = engine.partyMembers.find(pm => pm.role === 'T1' && pm.alive);
+        const t2Pm = engine.partyMembers.find(pm => pm.role === 'T2' && pm.alive);
+        if (t1Pm && t1Pm.role !== humanRole) {
+          t1Pm.tweenTo(
+            cx + frontDist * Math.cos(finalFanDir),
+            cy + frontDist * Math.sin(finalFanDir),
+            travelMs,
+          );
+        }
+        if (t2Pm && t2Pm.role !== humanRole) {
+          t2Pm.tweenTo(
+            cx + frontDist * Math.cos(finalFanDir + 0.35),
+            cy + frontDist * Math.sin(finalFanDir + 0.35),
+            travelMs,
+          );
+        }
+        const others = engine.partyMembers.filter(
+          pm => pm.alive && pm.role !== 'T1' && pm.role !== 'T2' && pm.role !== humanRole,
+        );
+        others.forEach((pm, i) => {
+          const off = (i - (others.length - 1) / 2) * step;
+          pm.tweenTo(
+            cx + backDist * Math.cos(finalFanDir + Math.PI + off),
+            cy + backDist * Math.sin(finalFanDir + Math.PI + off),
+            travelMs,
+          );
+        });
+      }
+    }
+
+    // 탱버 착탄: T1·T2 제외한 플레이어가 범위 내이면 게임오버
+    if (finalKickFan?.isExploding && !finalHitChecked) {
+      finalHitChecked = true;
+      const tankRoles = new Set(['T1', 'T2']);
+      const allP = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
+      for (const p of allP) {
+        if (tankRoles.has(p.role)) continue;
+        if (finalKickFan.hitsPlayer(p)) {
+          if (p === engine.player) engine.gameOver = true;
+          else p.alive = false;
+        }
+      }
+    }
+
+    // ── 보스 랜덤 회전 + 뱀발 + 근접장판 + T1/T2 산개 ──────────────
+
+    // 탱버 착탄 직후: 보스 랜덤 회전 시작 (90·180·270·360° 중 랜덤, 1초)
+    if (finalHitChecked && postRotStartMs === 0) {
+      postRotStartMs = elapsed;
+      postRotFrom    = engine.boss.angle;
+      const rotAmounts = [Math.PI / 2, Math.PI, 3 * Math.PI / 2, 2 * Math.PI];
+      postRotTo = postRotFrom + rotAmounts[Math.floor(Math.random() * 4)];
+    }
+
+    // 회전 애니메이션 (1초)
+    if (postRotStartMs > 0 && !postRotDone) {
+      const rE = elapsed - postRotStartMs;
+      if (rE >= 1000) {
+        engine.boss.setFacing(postRotTo);
+        postRotDone = true;
+      } else {
+        engine.boss.setFacing(postRotFrom + (postRotTo - postRotFrom) * (rE / 1000));
+      }
+    }
+
+    // 회전 완료 즉시: AI 파티원 전원 보스 뒤로 이동 (T1·T2 포함 / 3초 대기 동안 이동)
+    if (postRotDone && !postPreMoveDone) {
+      postPreMoveDone = true;
+      const cx        = engine.canvas.width  / 2;
+      const cy        = engine.canvas.height / 2;
+      const fDir      = postRotTo + Math.PI / 2;
+      const backD     = engine.arenaRadius * 0.30;
+      const humanRole = engine.selectedRole;
+      const step      = (22 * Math.PI) / 180;
+      const travelMs  = 2500;
+
+      engine.partyMembers
+        .filter(pm => pm.alive && pm.role !== humanRole)
+        .forEach((pm, i, arr) => {
+          const off = (i - (arr.length - 1) / 2) * step;
+          pm.tweenTo(cx + backD * Math.cos(fDir + Math.PI + off), cy + backD * Math.sin(fDir + Math.PI + off), travelMs);
+        });
+    }
+
+    // 회전 후 3초 → 뱀발 후려차기 즉시 발동 (전조 500ms, 폭발 500ms)
+    if (postRotDone && !postKickFired && elapsed >= postRotStartMs + 1000 + 3000) {
+      postKickFired   = true;
+      postKickStartMs = elapsed;
+      const cx      = engine.canvas.width  / 2;
+      const cy      = engine.canvas.height / 2;
+      postKickFanDir = engine.boss.angle + Math.PI / 2;
+
+      postKickFanRef = new FanAoE({
+        x: cx, y: cy,
+        radius:     engine.arenaRadius,
+        startAngle: postKickFanDir - Math.PI / 2,
+        endAngle:   postKickFanDir + Math.PI / 2,
+        delay:      500,
+        duration:   500,
+        colors:     SNAKE_KICK_COLORS,
+        noAutoKill: true,
+      });
+      engine.aoes.push(postKickFanRef);
+    }
+
+    // 뱀발 착탄 시: T1·T2 외에 전방에 있으면 게임오버
+    if (postKickFanRef?.isExploding && !postKickChecked) {
+      postKickChecked = true;
+      const tankRoles2 = new Set(['T1', 'T2']);
+      const allP2 = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
+      for (const p of allP2) {
+        if (tankRoles2.has(p.role)) continue;
+        if (postKickFanRef.hitsPlayer(p)) {
+          if (p === engine.player) engine.gameOver = true;
+          else p.alive = false;
+        }
+      }
+    }
+
+    // 뱀발 전조 등장(500ms) 후: T1·T2 산개 이동 (보스 전방 기준 왼쪽/오른쪽 dist=0.55)
+    // 나머지 파티원은 보스 뒤로 유지
+    if (postKickFired && !postSpreadDone && elapsed >= postKickStartMs + 500) {
+      postSpreadDone  = true;
+      const cx        = engine.canvas.width  / 2;
+      const cy        = engine.canvas.height / 2;
+      const fDir      = postKickFanDir;
+      const spreadD   = engine.arenaRadius * 0.55;
+      const spreadAng = Math.PI / 4;   // ±45° → 전방 180° 내 유지
+      const backD     = engine.arenaRadius * 0.30;
+      const humanRole = engine.selectedRole;
+      const step      = (22 * Math.PI) / 180;
+      const travelMs  = 2000;
+
+      const t1Pm = engine.partyMembers.find(pm => pm.role === 'T1' && pm.alive);
+      const t2Pm = engine.partyMembers.find(pm => pm.role === 'T2' && pm.alive);
+      if (t1Pm && t1Pm.role !== humanRole)
+        t1Pm.tweenTo(cx + spreadD * Math.cos(fDir - spreadAng), cy + spreadD * Math.sin(fDir - spreadAng), travelMs);
+      if (t2Pm && t2Pm.role !== humanRole)
+        t2Pm.tweenTo(cx + spreadD * Math.cos(fDir + spreadAng), cy + spreadD * Math.sin(fDir + spreadAng), travelMs);
+      engine.partyMembers
+        .filter(pm => pm.alive && pm.role !== 'T1' && pm.role !== 'T2' && pm.role !== humanRole)
+        .forEach((pm, i, arr) => {
+          const off = (i - (arr.length - 1) / 2) * step;
+          pm.tweenTo(cx + backD * Math.cos(fDir + Math.PI + off), cy + backD * Math.sin(fDir + Math.PI + off), travelMs);
+        });
+    }
+
+    // 뱀발 실행 후 3초: 보스 전방 180° 내 가장 가까운 2명에게 대형 원 착탄
+    if (postKickFired && !postCirclesDone && elapsed >= postKickStartMs + 3000) {
+      postCirclesDone = true;
+      const cx    = engine.canvas.width  / 2;
+      const cy    = engine.canvas.height / 2;
+      const fDir  = postKickFanDir;
+      const bigR  = Math.round(engine.canvas.width / 40 * 1.1 * 3) * 2;
+
+      const allP3  = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
+      const frontP = allP3.filter(p => {
+        let diff = Math.atan2(p.y - cy, p.x - cx) - fDir;
+        while (diff >  Math.PI) diff -= 2 * Math.PI;
+        while (diff < -Math.PI) diff += 2 * Math.PI;
+        return Math.abs(diff) <= Math.PI / 2;
+      }).sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+
+      for (const t of frontP.slice(0, 2)) {
+        const c = new CircleAoE({
+          x: t.x, y: t.y,
+          radius: bigR,
+          delay: 0, duration: 1500,
+          type: null,
+          noAutoKill: true,
+        });
+        engine.aoes.push(c);
+        postCircleAoes.push(c);
+      }
+    }
+
+    // 근접 원 착탄 판정: T1·T2 외 플레이어가 범위 내이면 게임오버
+    if (postCircleAoes.length > 0 && !postCircleChecked) {
+      if (postCircleAoes.some(c => c.isExploding)) {
+        postCircleChecked = true;
+        const tankRoles3 = new Set(['T1', 'T2']);
+        const allP4 = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
+        for (const p of allP4) {
+          if (tankRoles3.has(p.role)) continue;
+          if (postCircleAoes.some(c => c.hitsPlayer(p))) {
+            if (p === engine.player) engine.gameOver = true;
+            else p.alive = false;
+          }
+        }
+      }
+    }
   };
 }

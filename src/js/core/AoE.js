@@ -5,7 +5,8 @@ export class CircleAoE {
   // type: 'flame' | 'dark' | null  (null = 즉사)
   // colors: { explodeRGB, explodeStroke } (없으면 기본 주황/빨강)
   // icon: HTMLImageElement — 착탄 중 AoE 위에 표시할 이미지
-  constructor({ x, y, radius, delay = 3000, duration = 500, type = null, colors = null, icon = null }) {
+  // noAutoKill: true — 엔진 자동 즉사 판정을 건너뜀 (기믹 코드에서 직접 처리)
+  constructor({ x, y, radius, delay = 3000, duration = 500, type = null, colors = null, icon = null, noAutoKill = false }) {
     this.x = x;
     this.y = y;
     this.radius = radius;
@@ -17,6 +18,7 @@ export class CircleAoE {
     this.colors = colors;
     this.icon = icon;
     this._hitPlayer = false;
+    this.noAutoKill = noAutoKill;
   }
 
   get isExploding() {
@@ -78,7 +80,8 @@ export class CircleAoE {
 export class FanAoE {
   // colors 옵션: { telegraphRGB, explodeRGB, telegraphStroke, explodeStroke }
   //   telegraphRGB / explodeRGB : '255,220,0' 형식의 r,g,b 문자열
-  constructor({ x, y, radius, startAngle, endAngle, delay = 3000, duration = 500, colors = null }) {
+  // noAutoKill: true — 엔진 자동 즉사 판정을 건너뜀 (기믹 코드에서 직접 처리)
+  constructor({ x, y, radius, startAngle, endAngle, delay = 3000, duration = 500, colors = null, noAutoKill = false }) {
     this.x = x;
     this.y = y;
     this.radius = radius;
@@ -89,6 +92,7 @@ export class FanAoE {
     this.elapsed = 0;
     this.done = false;
     this.colors = colors;
+    this.noAutoKill = noAutoKill;
   }
 
   get isExploding() {

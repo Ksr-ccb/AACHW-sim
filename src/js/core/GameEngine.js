@@ -173,6 +173,7 @@ export class GameEngine {
 
       // 플레이어 피격
       for (const aoe of this.aoes) {
+        if (aoe.noAutoKill) continue;   // 기믹 코드에서 직접 처리하는 AoE는 건너뜀
         if (!aoe.hitsPlayer(this.player)) continue;
         if (aoe.type === 'flame' || aoe.type === 'dark') {
           if (!aoe._hitPlayer) {
@@ -189,6 +190,7 @@ export class GameEngine {
       for (const pm of this.partyMembers) {
         if (!pm.alive) continue;
         for (const aoe of this.aoes) {
+          if (aoe.noAutoKill) continue;   // 기믹 코드에서 직접 처리
           if (aoe.hitsPlayer(pm) && aoe.type !== 'flame' && aoe.type !== 'dark') {
             pm.alive = false; break;
           }
