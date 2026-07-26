@@ -18,6 +18,7 @@ export class GameEngine {
     this.aoes = [];
     this.bossClones = [];
     this.playerReplicas = [];
+    this.drawables = [];
     this.bgImage = null;
     this.markerOverlay = null;
     this.running = false;
@@ -79,6 +80,7 @@ export class GameEngine {
     for (const pm of this.partyMembers) pm.visible = this.partyVisible;
 
     this.aoes = [];
+    this.drawables = [];
     this.gameOver = false;
     this.mechActive = false;
     this.debuffs = { flame: 0, dark: 0 };
@@ -105,6 +107,7 @@ export class GameEngine {
     this.aoes = [];
     this.bossClones = [];
     this.playerReplicas = [];
+    this.drawables = [];
     this.debuffs = { flame: 0, dark: 0 };
     this.gameOver = false;
     const cx = this.canvas.width / 2;
@@ -211,6 +214,8 @@ export class GameEngine {
     if (this.bgImage) ctx.drawImage(this.bgImage, 0, 0);
 
     if (this.markerOverlay) this.markerOverlay.draw(ctx);
+
+    for (const d of this.drawables) d.draw(ctx);
 
     if (this.boss) this.boss.draw(ctx);
 
