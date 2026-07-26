@@ -36,7 +36,29 @@ engine.markerOverlay = markers;
 let currentKey = null;
 
 // ── 기믹 탭 ──────────────────────────────────────────────
+function showDevNotice() {
+  if (document.getElementById('dev-notice')) return;
+  const el = document.createElement('div');
+  el.id = 'dev-notice';
+  el.textContent = '개발중입니다.';
+  Object.assign(el.style, {
+    position: 'fixed', top: '50%', left: '50%',
+    transform: 'translate(-50%, -50%)',
+    background: 'rgba(0,0,0,0.85)', color: '#fff',
+    fontSize: '1.4rem', padding: '1.2rem 2.5rem',
+    borderRadius: '10px', zIndex: '9999',
+    pointerEvents: 'none', opacity: '1',
+    transition: 'opacity 0.4s',
+  });
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 400);
+  }, 1500);
+}
+
 async function selectMechanic(key) {
+  if (key !== 'replica') { showDevNotice(); return; }
   if (currentKey === key) return;
   currentKey = key;
 
