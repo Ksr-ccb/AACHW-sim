@@ -240,14 +240,9 @@ export function createTankBuster(engine) {
         const bigR   = Math.round(engine.canvas.width / 40 * 1.1 * 3) * 2;
 
         const allP   = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
-        const frontP = allP.filter(p => {
-          let diff = Math.atan2(p.y - cy(), p.x - cx()) - fDir;
-          while (diff >  Math.PI) diff -= 2 * Math.PI;
-          while (diff < -Math.PI) diff += 2 * Math.PI;
-          return Math.abs(diff) <= Math.PI / 2;
-        }).sort((a, b) => Math.hypot(a.x - cx(), a.y - cy()) - Math.hypot(b.x - cx(), b.y - cy()));
+        const targets = allP.filter(p => TANK_ROLES.has(p.role));
 
-        for (const t of frontP.slice(0, 2)) {
+        for (const t of targets) {
           const c = new CircleAoE({
             x: t.x, y: t.y,
             radius:    bigR,
