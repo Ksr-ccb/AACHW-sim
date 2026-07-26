@@ -81,6 +81,30 @@ export function createTankBuster(engine) {
     }
   }
 
+  // 이중 뒤돌려차기 전용: T1·T2 둘 다 맞아야 생존, 혼자 맞으면 사망 → 게임오버
+  function killCheckSharedTankBuster(fan) {
+    const allP     = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
+    const tanks    = allP.filter(p => TANK_ROLES.has(p.role));
+    const tanksHit = tanks.filter(p => fan.hitsPlayer(p));
+
+    if (tanksHit.length < 2) {
+      for (const t of tanksHit) {
+        if (t === engine.player) engine.gameOver = true;
+        else t.alive = false;
+      }
+      engine.gameOver = true;
+    }
+
+    for (const p of allP) {
+      if (TANK_ROLES.has(p.role)) continue;
+      if (fan.hitsPlayer(p)) {
+        if (p === engine.player) engine.gameOver = true;
+        else p.alive = false;
+        engine.gameOver = true;
+      }
+    }
+  }
+
   function spreadParty(fDir, t1TweenFn, t2TweenFn, travelMs) {
     const humanRole = engine.selectedRole;
     const r         = engine.arenaRadius;
@@ -153,7 +177,7 @@ export function createTankBuster(engine) {
 
       if (castFan?.isExploding && !hitChecked) {
         hitChecked = true;
-        killCheck(castFan, TANK_ROLES);
+        killCheckSharedTankBuster(castFan);
       }
 
       // ── 2. 랜덤 회전 (1초) ──────────────────────────────────
@@ -259,6 +283,16 @@ export function createTankBuster(engine) {
       if (circleAoes.length > 0 && !circleChecked && circleAoes.some(c => c.isExploding)) {
         circleChecked = true;
         const allP4 = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
+
+        // 두 원이 겹치면 탱커 사망
+        if (circleAoes.length === 2) {
+          const [c1, c2] = circleAoes;
+          if (Math.hypot(c1.x - c2.x, c1.y - c2.y) < c1.radius + c2.radius) {
+            engine.gameOver = true;
+          }
+        }
+
+        // 비탱커 적중 시 사망
         for (const p of allP4) {
           if (TANK_ROLES.has(p.role)) continue;
           if (circleAoes.some(c => c.hitsPlayer(p))) {

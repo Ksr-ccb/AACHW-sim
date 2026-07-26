@@ -498,6 +498,25 @@ export function mechanicTick(engine) {
   let clonesDespawned = false;
   let tankBuster      = null;    // createTankBuster() 인스턴스
 
+  // 불장판 쉐어 체크용
+  let flameAoe1    = null;
+  let flameAoe1Chk = false;
+  let flameAoe2L   = null;
+  let flameAoe2R   = null;
+  let flameAoe2Chk = false;
+
+  function checkFlameShare(aoe) {
+    const allP   = [engine.player, ...engine.partyMembers.filter(pm => pm.alive)];
+    const inside = allP.filter(p => aoe.hitsPlayer(p));
+    if (inside.length < 2) {
+      for (const p of inside) {
+        if (p === engine.player) engine.gameOver = true;
+        else p.alive = false;
+      }
+      engine.gameOver = true;
+    }
+  }
+
   return (dt) => {
     elapsed += dt;
 
@@ -593,12 +612,14 @@ export function mechanicTick(engine) {
       // 4. 분신의 3초짜리 캐스팅바가 70프로 진행되었을 때, 불/어둠 대상자 선별종료
       // 5. 분신의 3초짜리 캐스팅바가 종료되고 불/어둠 대상자에게 장판을 생성
       //   => 불/어둠 장판을 2개이상 맞은 경우 바로 게임오버
-      engine.aoes.push(new CircleAoE({
+      flameAoe1 = new CircleAoE({
         x: flameTarget.x, y: flameTarget.y,
         radius: aoeR, delay: 0, duration: 1000,
         type: 'flame', colors: FLAME_COLORS,
         icon: engine._debuffImgs.flame,
-      }));
+        noAutoKill: true,
+      });
+      engine.aoes.push(flameAoe1);
 
       for (const target of darkTargets) {
         engine.aoes.push(new CircleAoE({
@@ -779,12 +800,15 @@ export function mechanicTick(engine) {
           const target = byDist[0];
           flameClone.x = target.x;
           flameClone.y = target.y;
-          engine.aoes.push(new CircleAoE({
+          const fAoe = new CircleAoE({
             x: target.x, y: target.y,
             radius: aoeR, delay: 0, duration: 1000,
             type: 'flame', colors: FLAME_COLORS,
             icon: engine._debuffImgs.flame,
-          }));
+            noAutoKill: true,
+          });
+          engine.aoes.push(fAoe);
+          if (suffix === 'L') flameAoe2L = fAoe; else flameAoe2R = fAoe;
         }
 
         const darkClone = splitClonesMap[darkLbl + suffix];
@@ -823,6 +847,17 @@ export function mechanicTick(engine) {
         tankBuster        = createTankBuster(engine);
         tankBuster.start();
       }
+    }
+
+    // 불장판 쉐어 체크 (혼자 맞으면 사망)
+    if (flameAoe1 && !flameAoe1Chk && flameAoe1.isExploding) {
+      flameAoe1Chk = true;
+      checkFlameShare(flameAoe1);
+    }
+    if (!flameAoe2Chk && (flameAoe2L?.isExploding || flameAoe2R?.isExploding)) {
+      flameAoe2Chk = true;
+      if (flameAoe2L) checkFlameShare(flameAoe2L);
+      if (flameAoe2R) checkFlameShare(flameAoe2R);
     }
 
     // 탱버 + 랜덤 회전 + 뱀발 + 산개 + 원 — tankBuster 가 내부 상태를 모두 관리
