@@ -5,25 +5,23 @@ export const ARENA = 'img/M12s-P2a-Arena.png';
 const SPHERE_DIST = 0.44;   // 중앙 기준 거리 비율
 const SPHERE_SIZE = 0.15;   // arenaRadius 대비 이미지 표시 크기 비율
 
-// ── 묶음별 거리 · 크기 · 방향 조정 ────────────────────────────────
-const ORB_OFFSET = {
-  RG: 0.4,    // red-green 묶음 — 구 중심에서 오브까지 실제 거리 (arenaRadius 비율)
-  PB: 0.4,    // purple-blue 묶음
-};
-//가까운거리 0.25
-
+// ── 기준구 오브 거리 ─────────────────────────────────────────────
+const ORB_OFFSET_SHORT = 0.25;   // 기준구 — 가까운 쌍 거리
+const ORB_OFFSET_LONG  = 0.38;   // 기준구 — 먼 쌍 거리
+// ── 오브 이미지 높이 (arenaRadius 비율, 색상별 개별 설정) ─────────
 const ORB_HEIGHT = {
   red:    0.08,
-  green:  0.15,
-  purple: 0.2,
-  blue:   0.12,
+  green:  0.08,
+  purple: 0.08,
+  blue:   0.08,
 };
-// 북/남 기준 동서 방향 각도(도) — 45=NW/SW, 22.5=NNW/SSW, 0=정북/남
+// ── 북/남 기준 동서 방향 각도(도) — 묶음별 설정 ─────────────────
+// 45=NW/SW, 22.5=NNW/SSW, 0=정북/남
 const ORB_ANGLE_DEG = {
-  RG: 31,
-  PB: 31,
+  RG: 35,
+  PB: 35,
 };
-// ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 
 const PAIR = {
   red:    'RG',
@@ -64,10 +62,12 @@ const ORB_CORNERS = [
 ];
 
 class SphereDrawable {
-  constructor(engine, dx, colorAssignment) {
+  // shortPair: 'RG' | 'PB' — 기준구에서 가까운 묶음. null이면 플레이어 구 (오브 미표시)
+  constructor(engine, dx, colorAssignment, shortPair) {
     this.engine          = engine;
     this.dx              = dx;
     this.colorAssignment = colorAssignment;
+    this.shortPair       = shortPair;
     this.visible         = true;
     this.showOrbs        = false;
   }
@@ -94,14 +94,14 @@ class SphereDrawable {
     for (const { key, signX, signY } of ORB_CORNERS) {
       const color    = this.colorAssignment[key];
       const pair     = PAIR[color];
-      const offset   = ORB_OFFSET[pair] * r;
+      const isShort  = pair === this.shortPair;
+      const offset   = (isShort ? ORB_OFFSET_SHORT : ORB_OFFSET_LONG) * r;
       const angleRad = ORB_ANGLE_DEG[pair] * (Math.PI / 180);
       const h        = ORB_HEIGHT[color] * r;
       const img      = orbImgs[color];
 
       if (!img.complete || img.naturalWidth === 0) continue;
 
-      // 북/남 기준 각도로 x/y 분해 — sin²+cos²=1 이므로 offset이 실제 거리
       const ox = sx + signX * Math.sin(angleRad) * offset;
       const oy = sy + signY * Math.cos(angleRad) * offset;
       const w  = h * (img.naturalWidth / img.naturalHeight);
@@ -113,8 +113,12 @@ class SphereDrawable {
 export function mechanicTick(engine) {
   const assignment = randomColorAssignment();
 
-  const east = new SphereDrawable(engine,  1, assignment);
-  const west = new SphereDrawable(engine, -1, assignment);
+  // 기준구 위치(좌/우)와 가까운 묶음 랜덤 결정
+  const refDx     = Math.random() < 0.5 ? 1 : -1;   // +1=동(우), -1=서(좌)
+  const shortPair = Math.random() < 0.5 ? 'RG' : 'PB';
+
+  const east = new SphereDrawable(engine,  1, assignment, refDx ===  1 ? shortPair : null);
+  const west = new SphereDrawable(engine, -1, assignment, refDx === -1 ? shortPair : null);
   engine.drawables.push(east, west);
 
   let elapsed     = 0;
@@ -134,11 +138,12 @@ export function mechanicTick(engine) {
       west.visible = phase === 0;
 
       if (fe >= FLICKER_DUR) {
-        flickerDone   = true;
-        east.visible  = true;
-        west.visible  = true;
-        east.showOrbs = true;
-        west.showOrbs = true;
+        flickerDone  = true;
+        east.visible = true;
+        west.visible = true;
+        // 기준구(shortPair가 있는 쪽)에만 오브 표시
+        if (east.shortPair) east.showOrbs = true;
+        if (west.shortPair) west.showOrbs = true;
       }
     }
   };
