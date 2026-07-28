@@ -7,19 +7,19 @@ const SPHERE_SIZE = 0.15;   // arenaRadius 대비 이미지 표시 크기 비율
 
 // ── 기준구 오브 거리 ─────────────────────────────────────────────
 const ORB_OFFSET_SHORT = 0.25;   // 기준구 — 가까운 쌍 거리
-const ORB_OFFSET_LONG  = 0.38;   // 기준구 — 먼 쌍 거리
+const ORB_OFFSET_LONG  = 0.5;   // 기준구 — 먼 쌍 거리
 // ── 오브 이미지 높이 (arenaRadius 비율, 색상별 개별 설정) ─────────
 const ORB_HEIGHT = {
   red:    0.08,
-  green:  0.08,
-  purple: 0.08,
-  blue:   0.08,
+  green:  0.15,
+  purple: 0.2,
+  blue:   0.12,
 };
 // ── 북/남 기준 동서 방향 각도(도) — 묶음별 설정 ─────────────────
 // 45=NW/SW, 22.5=NNW/SSW, 0=정북/남
 const ORB_ANGLE_DEG = {
-  RG: 35,
-  PB: 35,
+  RG: 27.5,
+  PB: 27.5,
 };
 // ─────────────────────────────────────────────────────────────────
 
@@ -141,9 +141,8 @@ export function mechanicTick(engine) {
         flickerDone  = true;
         east.visible = true;
         west.visible = true;
-        // 기준구(shortPair가 있는 쪽)에만 오브 표시
-        if (east.shortPair) east.showOrbs = true;
-        if (west.shortPair) west.showOrbs = true;
+        east.showOrbs = true;
+        west.showOrbs = true;
       }
     }
   };
