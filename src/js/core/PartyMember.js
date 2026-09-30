@@ -11,6 +11,7 @@ export class PartyMember {
     this.speed = 3.5;
     this.visible = true;
     this.alive = true;
+    this.statusEffects = [];
   }
 
   get color() {

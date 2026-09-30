@@ -37,6 +37,8 @@ function loadImg(src) {
 }
 
 const sphereImg = loadImg('img/reference/mana_sphere_before.jpg');
+const alphaImg  = loadImg('img/reference/mana_sphere_alpha.jpg');
+const betaImg   = loadImg('img/reference/mana_sphere_beta.jpg');
 const orbImgs = {
   red:    loadImg('img/reference/mana_sphere_red.jpg'),
   purple: loadImg('img/reference/mana_sphere_purple.jpg'),
@@ -110,6 +112,41 @@ class SphereDrawable {
   }
 }
 
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function assignDebuffs(engine) {
+  const DURATION = 8000;
+
+  const tankRoles = shuffle(['T1', 'T2']);
+  const healRoles = shuffle(['H1', 'H2']);
+  const dpsRoles  = shuffle(['D1', 'D2', 'D3', 'D4']);
+  const dpsTypes  = shuffle(['alpha', 'alpha', 'beta', 'beta']);
+
+  const pairs = [
+    [tankRoles[0], 'alpha'], [tankRoles[1], 'beta'],
+    [healRoles[0], 'alpha'], [healRoles[1], 'beta'],
+    ...dpsRoles.map((r, i) => [r, dpsTypes[i]]),
+  ];
+
+  for (const [role, type] of pairs) {
+    const img    = type === 'alpha' ? alphaImg : betaImg;
+    const effect = { type, remainMs: DURATION, img };
+    if (engine.player.role === role) {
+      engine.player.statusEffects.push(effect);
+    } else {
+      const pm = engine.partyMembers.find(p => p.role === role);
+      if (pm) pm.statusEffects.push(effect);
+    }
+  }
+}
+
 export function mechanicTick(engine) {
   const assignment = randomColorAssignment();
 
@@ -143,6 +180,7 @@ export function mechanicTick(engine) {
         west.visible = true;
         east.showOrbs = true;
         west.showOrbs = true;
+        assignDebuffs(engine);
       }
     }
   };

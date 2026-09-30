@@ -8,6 +8,7 @@ export class Player {
     this.role = role;
     this.speed = 3;
     this.keys = new Set();
+    this.statusEffects = [];
 
     this._onKeyDown = (e) => {
       const key = e.key.toLowerCase();
