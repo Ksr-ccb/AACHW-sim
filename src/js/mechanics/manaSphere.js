@@ -1,5 +1,7 @@
 // 마나스피어 — M12s-P2a-Arena
 
+import { CircleAoE, DonutAoE, FanAoE } from '../core/AoE.js';
+
 export const ARENA = 'img/M12s-P2a-Arena.png';
 
 const SPHERE_DIST = 0.44;
@@ -84,6 +86,7 @@ class SphereDrawable {
         pauseMs: 0,
         used: false,
         side: signY < 0 ? 'north' : 'south',
+        absorbedAt: Infinity,
       };
     });
   }
@@ -120,15 +123,25 @@ class SphereDrawable {
     };
   }
 
-  tickOrbs(dt) {
+  tickOrbs(dt, elapsed) {
     for (const orb of this.orbs) {
       if (orb.pauseMs > 0) {
         orb.pauseMs = Math.max(0, orb.pauseMs - dt);
       } else if (orb.offset > 0) {
-        // used여도 일시정지 후 구 중심으로 계속 이동
         orb.offset = Math.max(0, orb.offset - ORB_MOVE_SPEED * dt);
+        if (orb.offset === 0) orb.absorbedAt = elapsed;
       }
     }
+  }
+
+  // wave 0 = 먼저 흡수된 절반, wave 1 = 나중 흡수된 절반
+  getWaveColors(waveIndex) {
+    const absorbed = [...this.orbs]
+      .filter(o => o.absorbedAt < Infinity)
+      .sort((a, b) => a.absorbedAt - b.absorbedAt);
+    const mid = Math.ceil(absorbed.length / 2);
+    return (waveIndex === 0 ? absorbed.slice(0, mid) : absorbed.slice(mid))
+      .map(o => o.color);
   }
 
   draw(ctx) {
@@ -271,17 +284,77 @@ function positionAlphaAI(engine, alphaRoles) {
   }
 }
 
-// 베타 탱커 AI만 인터셉트 위치로 이동 (힐/딜러는 플레이어 충돌 시 순간이동)
+// 베타 AI 이동:
+//   탱커 → 항상 북쪽 오브 인터셉트
+//   힐/딜러 → 플레이어가 알파일 때만 남쪽 오브 인터셉트 (베타 플레이어라면 충돌 시 순간이동)
 function positionBetaAI(engine, betaRoles, nonRefSphere, shortPair) {
-  const northOrb = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === 'north');
+  const northOrb    = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === 'north');
+  const southOrb    = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === 'south');
+  const playerIsAlpha = !betaRoles.includes(engine.selectedRole);
 
   for (const role of betaRoles) {
-    if (!role.startsWith('T')) continue;     // 탱커만
     if (role === engine.selectedRole) continue;
     const pm = engine.partyMembers.find(p => p.role === role && p.alive);
-    if (!pm || !northOrb) continue;
-    const p = nonRefSphere.orbInterceptPos(northOrb, 0.15);
-    pm.tweenTo(p.x, p.y, 1800);
+    if (!pm) continue;
+
+    if (role.startsWith('T')) {
+      if (!northOrb) continue;
+      const p = nonRefSphere.orbInterceptPos(northOrb, 0.15);
+      pm.tweenTo(p.x, p.y, 1800);
+    } else if (playerIsAlpha) {
+      if (!southOrb) continue;
+      const p = nonRefSphere.orbInterceptPos(southOrb, 0.15);
+      pm.tweenTo(p.x, p.y, 1800);
+    }
+    // 플레이어가 베타 힐/딜러: 이동 없음, 충돌 시 순간이동
+  }
+}
+
+// ── 오브 기믹 발동 ──────────────────────────────────────────────
+
+const WAVE_WARN_MS = 0;      // 예고 없음 — 즉시 발동
+const WAVE_HIT_MS  = 2000;   // 장판 지속 2초
+
+function sphereCenter(engine, sphere) {
+  const r  = engine.arenaRadius;
+  const cx = engine.canvas.width  / 2;
+  const cy = engine.canvas.height / 2;
+  return { x: cx + sphere.dx * SPHERE_DIST * r, y: cy };
+}
+
+function fireOrbMechanics(engine, colors, spheres) {
+  const r = engine.arenaRadius;
+
+  const greenColors  = { telegraphRGB: '50,180,50',   explodeRGB: '50,180,50',   telegraphStroke: '#44ff44', explodeStroke: '#44ff44' };
+  const blueColors   = { telegraphRGB: '50,100,220',  explodeRGB: '50,100,220',  telegraphStroke: '#4466ff', explodeStroke: '#4466ff' };
+  const purpleColors = { telegraphRGB: '160,50,220',  explodeRGB: '160,50,220',  telegraphStroke: '#aa44ff', explodeStroke: '#aa44ff' };
+  const redColors    = { telegraphRGB: '220,50,50',   explodeRGB: '220,50,50',   telegraphStroke: '#ff4444', explodeStroke: '#ff4444' };
+
+  for (const sphere of spheres) {
+    const { x: sx, y: sy } = sphereCenter(engine, sphere);
+
+    for (const color of colors) {
+      const base = { x: sx, y: sy, delay: WAVE_WARN_MS, duration: WAVE_HIT_MS };
+
+      if (color === 'green') {
+        engine.aoes.push(new DonutAoE({ ...base, innerRadius: 0.25 * r, outerRadius: 2 * r, colors: greenColors }));
+
+      } else if (color === 'blue') {
+        engine.aoes.push(new CircleAoE({ ...base, radius: 0.4 * r, colors: blueColors }));
+
+      } else if (color === 'purple') {
+        // 북쪽 90° (캔버스에서 위 = -π/2 중심)
+        engine.aoes.push(new FanAoE({ ...base, radius: 3 * r, startAngle: -Math.PI * 3 / 4, endAngle: -Math.PI / 4, colors: purpleColors }));
+        // 남쪽 90°
+        engine.aoes.push(new FanAoE({ ...base, radius: 3 * r, startAngle:  Math.PI / 4,     endAngle:  Math.PI * 3 / 4, colors: purpleColors }));
+
+      } else if (color === 'red') {
+        // 동쪽 90°
+        engine.aoes.push(new FanAoE({ ...base, radius: 3 * r, startAngle: -Math.PI / 4, endAngle: Math.PI / 4, colors: redColors }));
+        // 서쪽 90°
+        engine.aoes.push(new FanAoE({ ...base, radius: 3 * r, startAngle: Math.PI * 3 / 4, endAngle: Math.PI * 5 / 4, colors: redColors }));
+      }
+    }
   }
 }
 
@@ -301,6 +374,7 @@ export function mechanicTick(engine) {
   // 비기준구: 전부 0.5 → 플레이어가 실제로 충돌하는 쪽
   const nonRefSphere = refDx === 1 ? west : east;
 
+
   let elapsed              = 0;
   let flickerDone          = false;
   let debuffAssignedAt     = -1;
@@ -311,6 +385,9 @@ export function mechanicTick(engine) {
   let bossFollowActive     = false;
   let switchApplied        = false;
   let secondDebuffApplied  = false;
+  let secondDebuffAt       = -1;
+  let wave1Fired           = false;
+  let wave2Fired           = false;
 
   const FLICKER_START  = 2000;
   const FLICKER_DUR    = 400;
@@ -342,8 +419,8 @@ export function mechanicTick(engine) {
 
     // 오브 이동 + 충돌 판정 (디버프 잔여 5초 시점부터)
     if (elapsed >= debuffAssignedAt + ORB_MOVE_DELAY) {
-      east.tickOrbs(dt);
-      west.tickOrbs(dt);
+      east.tickOrbs(dt, elapsed);
+      west.tickOrbs(dt, elapsed);
       checkOrbCollisions(engine, nonRefSphere, shortPair, betaRoles);
 
       if (!alphaPositioned) {
@@ -403,8 +480,9 @@ export function mechanicTick(engine) {
     // 두 번째 디버프: 알파⇔베타 교체, 16초 지속
     if (!secondDebuffApplied && betaRoles && elapsed >= debuffAssignedAt + 11000) {
       secondDebuffApplied = true;
+      secondDebuffAt = elapsed;
       for (const role of betaRoles.alpha) {
-        const e = { type: 'beta', remainMs: 16000, img: betaImg };
+        const e = { type: 'beta', remainMs: 26000, img: betaImg };
         if (engine.player.role === role) engine.player.statusEffects.push(e);
         else { const pm = engine.partyMembers.find(p => p.role === role); if (pm) pm.statusEffects.push(e); }
       }
@@ -413,6 +491,22 @@ export function mechanicTick(engine) {
         if (engine.player.role === role) engine.player.statusEffects.push(e);
         else { const pm = engine.partyMembers.find(p => p.role === role); if (pm) pm.statusEffects.push(e); }
       }
+    }
+
+    // Wave 1: 두 번째 디버프 부여 6초 후 — 구체별 첫 흡수 색 기믹
+    if (!wave1Fired && secondDebuffAt >= 0 && elapsed >= secondDebuffAt + 6000) {
+      wave1Fired = true;
+      const refSphere = refDx === 1 ? east : west;
+      fireOrbMechanics(engine, refSphere.getWaveColors(0), [refSphere]);
+      fireOrbMechanics(engine, nonRefSphere.getWaveColors(0), [nonRefSphere]);
+    }
+
+    // Wave 2: Wave 1 후 6초 — 구체별 두번째 흡수 색 기믹
+    if (!wave2Fired && wave1Fired && elapsed >= secondDebuffAt + 12000) {
+      wave2Fired = true;
+      const refSphere = refDx === 1 ? east : west;
+      fireOrbMechanics(engine, refSphere.getWaveColors(1), [refSphere]);
+      fireOrbMechanics(engine, nonRefSphere.getWaveColors(1), [nonRefSphere]);
     }
   };
 }

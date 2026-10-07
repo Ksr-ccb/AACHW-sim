@@ -77,6 +77,78 @@ export class CircleAoE {
   }
 }
 
+export class DonutAoE {
+  constructor({ x, y, innerRadius, outerRadius, delay = 3000, duration = 500, colors = null, noAutoKill = false }) {
+    this.x = x;
+    this.y = y;
+    this.innerRadius = innerRadius;
+    this.outerRadius = outerRadius;
+    this.delay = delay;
+    this.duration = duration;
+    this.elapsed = 0;
+    this.done = false;
+    this.colors = colors;
+    this.noAutoKill = noAutoKill;
+  }
+
+  get isExploding() {
+    return this.elapsed >= this.delay && this.elapsed < this.delay + this.duration;
+  }
+
+  hitsPlayer(player) {
+    if (!this.isExploding) return false;
+    const dx   = player.x - this.x;
+    const dy   = player.y - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return dist > this.innerRadius - player.radius && dist < this.outerRadius + player.radius;
+  }
+
+  update(dt) {
+    this.elapsed += dt;
+    if (this.elapsed >= this.delay + this.duration) this.done = true;
+  }
+
+  draw(ctx) {
+    const t     = this.delay > 0 ? Math.min(this.elapsed / this.delay, 1) : 1;
+    const alpha = this.isExploding ? 0.85 : 0.25 + t * 0.25;
+
+    let fillColor, strokeColor;
+    if (this.colors) {
+      const rgb = this.isExploding ? this.colors.explodeRGB : this.colors.telegraphRGB;
+      fillColor   = `rgba(${rgb},${alpha})`;
+      strokeColor = this.isExploding ? this.colors.explodeStroke : this.colors.telegraphStroke;
+    } else {
+      fillColor   = this.isExploding ? `rgba(255,80,0,${alpha})` : `rgba(255,60,60,${alpha})`;
+      strokeColor = this.isExploding ? '#ff8800' : '#ff4444';
+    }
+
+    // 도넛 (outer CW + inner CCW → 구멍 생성)
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.outerRadius, 0, Math.PI * 2, false);
+    ctx.arc(this.x, this.y, this.innerRadius, 0, Math.PI * 2, true);
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.outerRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.innerRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (!this.isExploding) {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.outerRadius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * t);
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+  }
+}
+
 export class FanAoE {
   // colors 옵션: { telegraphRGB, explodeRGB, telegraphStroke, explodeStroke }
   //   telegraphRGB / explodeRGB : '255,220,0' 형식의 r,g,b 문자열
