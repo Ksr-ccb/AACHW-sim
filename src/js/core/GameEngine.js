@@ -270,14 +270,15 @@ export class GameEngine {
       x -= w;
       ctx.drawImage(img, x, y, w, iconH);
       if (remainMs !== null) {
-        const secs = Math.ceil(remainMs / 1000);
+        const secs   = Math.ceil(remainMs / 1000);
+        const timerH = 50;
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(x, y + iconH - 22, w, 22);
+        ctx.fillRect(x, y + iconH - timerH, w, timerH);
         ctx.fillStyle = '#ffffff';
-        ctx.font = `bold 14px sans-serif`;
+        ctx.font = `bold 42px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(secs, x + w / 2, y + iconH - 11);
+        ctx.fillText(secs, x + w / 2, y + iconH - timerH / 2);
       }
       x -= pad;
     };

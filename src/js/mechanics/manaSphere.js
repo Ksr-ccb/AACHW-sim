@@ -2,26 +2,26 @@
 
 export const ARENA = 'img/M12s-P2a-Arena.png';
 
-const SPHERE_DIST = 0.44;   // 중앙 기준 거리 비율
-const SPHERE_SIZE = 0.15;   // arenaRadius 대비 이미지 표시 크기 비율
+const SPHERE_DIST = 0.44;
+const SPHERE_SIZE = 0.15;
 
-// ── 기준구 오브 거리 ─────────────────────────────────────────────
-const ORB_OFFSET_SHORT = 0.25;   // 기준구 — 가까운 쌍 거리
-const ORB_OFFSET_LONG  = 0.5;   // 기준구 — 먼 쌍 거리
-// ── 오브 이미지 높이 (arenaRadius 비율, 색상별 개별 설정) ─────────
+const ORB_OFFSET_SHORT = 0.25;
+const ORB_OFFSET_LONG  = 0.5;
 const ORB_HEIGHT = {
   red:    0.08,
   green:  0.15,
   purple: 0.2,
   blue:   0.12,
 };
-// ── 북/남 기준 동서 방향 각도(도) — 묶음별 설정 ─────────────────
-// 45=NW/SW, 22.5=NNW/SSW, 0=정북/남
 const ORB_ANGLE_DEG = {
   RG: 27.5,
   PB: 27.5,
 };
-// ─────────────────────────────────────────────────────────────────
+
+const ORB_MOVE_SPEED    = ORB_OFFSET_LONG / 5000;  // arenaRadius 비율 / ms
+const ORB_HIT_DIST      = 0.05;   // 충돌 판정 거리 (arenaRadius 비율)
+const ORB_PAUSE_MS      = 2500;   // 충돌 시 오브 정지 시간 (ms)
+const BOSS_FOLLOW_SPEED = 0.15;   // 보스 추적 속도 (arenaRadius / sec)
 
 const PAIR = {
   red:    'RG',
@@ -29,6 +29,13 @@ const PAIR = {
   purple: 'PB',
   blue:   'PB',
 };
+
+const ORB_CORNERS = [
+  { key: 'NW', signX: -1, signY: -1 },
+  { key: 'NE', signX:  1, signY: -1 },
+  { key: 'SW', signX: -1, signY:  1 },
+  { key: 'SE', signX:  1, signY:  1 },
+];
 
 function loadImg(src) {
   const img = new Image();
@@ -46,8 +53,6 @@ const orbImgs = {
   blue:   loadImg('img/reference/mana_sphere_blue.jpg'),
 };
 
-// 묶음: [red,green], [purple,blue]
-// NW에 red/purple 중 랜덤 → SE는 NW의 묶음 짝, NE는 나머지, SW는 NE의 묶음 짝
 function randomColorAssignment() {
   if (Math.random() < 0.5) {
     return { NW: 'red', SE: 'green', NE: 'purple', SW: 'blue' };
@@ -56,22 +61,71 @@ function randomColorAssignment() {
   }
 }
 
-const ORB_CORNERS = [
-  { key: 'NW', signX: -1, signY: -1 },
-  { key: 'NE', signX:  1, signY: -1 },
-  { key: 'SW', signX: -1, signY:  1 },
-  { key: 'SE', signX:  1, signY:  1 },
-];
+// ── SphereDrawable ───────────────────────────────────────────────
 
 class SphereDrawable {
-  // shortPair: 'RG' | 'PB' — 기준구에서 가까운 묶음. null이면 플레이어 구 (오브 미표시)
   constructor(engine, dx, colorAssignment, shortPair) {
-    this.engine          = engine;
-    this.dx              = dx;
-    this.colorAssignment = colorAssignment;
-    this.shortPair       = shortPair;
-    this.visible         = true;
-    this.showOrbs        = false;
+    this.engine       = engine;
+    this.dx           = dx;
+    this.shortPair    = shortPair;
+    this.visible      = true;
+    this.showOrbs     = false;
+
+    this.orbs = ORB_CORNERS.map(({ key, signX, signY }) => {
+      const color      = colorAssignment[key];
+      const pair       = PAIR[color];
+      const isShort    = pair === shortPair;
+      const initOffset = isShort ? ORB_OFFSET_SHORT : ORB_OFFSET_LONG;
+      return {
+        key, signX, signY, color, pair, isShort,
+        offset: initOffset,
+        pauseMs: 0,
+        used: false,
+        side: signY < 0 ? 'north' : 'south',
+      };
+    });
+  }
+
+  // 오브의 현재 캔버스 좌표
+  orbWorldPos(orb) {
+    const { engine, dx } = this;
+    const r        = engine.arenaRadius;
+    const cx       = engine.canvas.width  / 2;
+    const cy       = engine.canvas.height / 2;
+    const sx       = cx + dx * SPHERE_DIST * r;
+    const sy       = cy;
+    const offset   = orb.offset * r;
+    const angleRad = ORB_ANGLE_DEG[orb.pair] * (Math.PI / 180);
+    return {
+      x: sx + orb.signX * Math.sin(angleRad) * offset,
+      y: sy + orb.signY * Math.cos(angleRad) * offset,
+    };
+  }
+
+  // 구 중심에서 fractionDist 거리에 위치한 오브 방향의 인터셉트 좌표
+  orbInterceptPos(orb, fractionDist) {
+    const { engine, dx } = this;
+    const r        = engine.arenaRadius;
+    const cx       = engine.canvas.width  / 2;
+    const cy       = engine.canvas.height / 2;
+    const sx       = cx + dx * SPHERE_DIST * r;
+    const sy       = cy;
+    const dist     = fractionDist * r;
+    const angleRad = ORB_ANGLE_DEG[orb.pair] * (Math.PI / 180);
+    return {
+      x: sx + orb.signX * Math.sin(angleRad) * dist,
+      y: sy + orb.signY * Math.cos(angleRad) * dist,
+    };
+  }
+
+  tickOrbs(dt) {
+    for (const orb of this.orbs) {
+      if (orb.pauseMs > 0) {
+        orb.pauseMs = Math.max(0, orb.pauseMs - dt);
+      } else if (!orb.used && orb.offset > 0) {
+        orb.offset = Math.max(0, orb.offset - ORB_MOVE_SPEED * dt);
+      }
+    }
   }
 
   draw(ctx) {
@@ -88,29 +142,23 @@ class SphereDrawable {
     }
 
     if (this.showOrbs) {
-      this._drawOrbs(ctx, x, y, r);
-    }
-  }
-
-  _drawOrbs(ctx, sx, sy, r) {
-    for (const { key, signX, signY } of ORB_CORNERS) {
-      const color    = this.colorAssignment[key];
-      const pair     = PAIR[color];
-      const isShort  = pair === this.shortPair;
-      const offset   = (isShort ? ORB_OFFSET_SHORT : ORB_OFFSET_LONG) * r;
-      const angleRad = ORB_ANGLE_DEG[pair] * (Math.PI / 180);
-      const h        = ORB_HEIGHT[color] * r;
-      const img      = orbImgs[color];
-
-      if (!img.complete || img.naturalWidth === 0) continue;
-
-      const ox = sx + signX * Math.sin(angleRad) * offset;
-      const oy = sy + signY * Math.cos(angleRad) * offset;
-      const w  = h * (img.naturalWidth / img.naturalHeight);
-      ctx.drawImage(img, ox - w / 2, oy - h / 2, w, h);
+      const now = performance.now();
+      for (const orb of this.orbs) {
+        if (orb.offset <= 0) continue;
+        // 정지 중인 오브 깜빡임 (100ms 주기)
+        if (orb.pauseMs > 0 && Math.floor(now / 100) % 2 === 0) continue;
+        const pos = this.orbWorldPos(orb);
+        const h   = ORB_HEIGHT[orb.color] * r;
+        const img = orbImgs[orb.color];
+        if (!img.complete || img.naturalWidth === 0) continue;
+        const w = h * (img.naturalWidth / img.naturalHeight);
+        ctx.drawImage(img, pos.x - w / 2, pos.y - h / 2, w, h);
+      }
     }
   }
 }
+
+// ── 헬퍼 함수 ───────────────────────────────────────────────────
 
 function shuffle(arr) {
   const a = [...arr];
@@ -121,6 +169,7 @@ function shuffle(arr) {
   return a;
 }
 
+// 알파/베타 디버프 배정. { alpha: [...], beta: [...] } 반환
 function assignDebuffs(engine) {
   const DURATION = 8000;
 
@@ -135,7 +184,10 @@ function assignDebuffs(engine) {
     ...dpsRoles.map((r, i) => [r, dpsTypes[i]]),
   ];
 
+  const result = { alpha: [], beta: [] };
+
   for (const [role, type] of pairs) {
+    result[type].push(role);
     const img    = type === 'alpha' ? alphaImg : betaImg;
     const effect = { type, remainMs: DURATION, img };
     if (engine.player.role === role) {
@@ -145,29 +197,116 @@ function assignDebuffs(engine) {
       if (pm) pm.statusEffects.push(effect);
     }
   }
+
+  return result;
 }
+
+// 비기준구 충돌 판정 — shortPair 색상 오브만 처리
+function checkOrbCollisions(engine, nonRefSphere, shortPair) {
+  const allActors = [engine.player, ...engine.partyMembers.filter(p => p.alive)];
+  const hitDist   = ORB_HIT_DIST * engine.arenaRadius;
+
+  for (const orb of nonRefSphere.orbs) {
+    if (orb.used || orb.pauseMs > 0 || orb.offset <= 0) continue;
+    if (PAIR[orb.color] !== shortPair) continue;   // 롱 색상 오브 건너뜀
+
+    const pos = nonRefSphere.orbWorldPos(orb);
+
+    const touchers = allActors.filter(actor => {
+      const ddx = actor.x - pos.x;
+      const ddy = actor.y - pos.y;
+      return Math.sqrt(ddx * ddx + ddy * ddy) < hitDist;
+    });
+
+    if (touchers.length === 0) continue;
+
+    orb.pauseMs = ORB_PAUSE_MS;
+    orb.used    = true;
+
+    const nonTanks = touchers.filter(a => !(a.role ?? '').startsWith('T'));
+
+    if (orb.side === 'north') {
+      // 북쪽 오브: 비탱커 즉사
+      for (const actor of nonTanks) {
+        if (actor === engine.player) engine.gameOver = true;
+        else actor.alive = false;
+      }
+    } else {
+      // 남쪽 오브: 비탱커 3명 미만 즉사
+      if (nonTanks.length < 3) {
+        for (const actor of nonTanks) {
+          if (actor === engine.player) engine.gameOver = true;
+          else actor.alive = false;
+        }
+      }
+    }
+  }
+}
+
+// 알파 AI → 맵 중앙으로 대피
+function positionAlphaAI(engine, alphaRoles) {
+  const cx = engine.canvas.width  / 2;
+  const cy = engine.canvas.height / 2;
+  for (const role of alphaRoles) {
+    if (role === engine.selectedRole) continue;
+    const pm = engine.partyMembers.find(p => p.role === role && p.alive);
+    if (pm) pm.tweenTo(cx, cy, 1800);
+  }
+}
+
+// 베타 AI → 비기준구의 shortPair 오브 인터셉트 위치로 이동
+function positionBetaAI(engine, betaRoles, nonRefSphere, shortPair) {
+  const northOrb = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === 'north');
+  const southOrb = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === 'south');
+
+  for (const role of betaRoles) {
+    if (role === engine.selectedRole) continue;
+    const pm = engine.partyMembers.find(p => p.role === role && p.alive);
+    if (!pm) continue;
+
+    if (role.startsWith('T') && northOrb) {
+      const p = nonRefSphere.orbInterceptPos(northOrb, 0.15);
+      pm.tweenTo(p.x, p.y, 1800);
+    } else if (!role.startsWith('T') && southOrb) {
+      const p = nonRefSphere.orbInterceptPos(southOrb, 0.15);
+      pm.tweenTo(p.x, p.y, 1800);
+    }
+  }
+}
+
+// ── 기믹 메인 ───────────────────────────────────────────────────
 
 export function mechanicTick(engine) {
   const assignment = randomColorAssignment();
 
-  // 기준구 위치(좌/우)와 가까운 묶음 랜덤 결정
-  const refDx     = Math.random() < 0.5 ? 1 : -1;   // +1=동(우), -1=서(좌)
+  const refDx     = Math.random() < 0.5 ? 1 : -1;
   const shortPair = Math.random() < 0.5 ? 'RG' : 'PB';
 
   const east = new SphereDrawable(engine,  1, assignment, refDx ===  1 ? shortPair : null);
   const west = new SphereDrawable(engine, -1, assignment, refDx === -1 ? shortPair : null);
   engine.drawables.push(east, west);
 
-  let elapsed     = 0;
-  let flickerDone = false;
+  // 기준구: 0.25/0.5 혼재 → 색상 힌트 제공
+  // 비기준구: 전부 0.5 → 플레이어가 실제로 충돌하는 쪽
+  const nonRefSphere = refDx === 1 ? west : east;
 
-  // t=2000ms: 구가 2번 깜짝임 (100ms 간격 4 phase = 2 사이클)
-  const FLICKER_START = 2000;
-  const FLICKER_DUR   = 400;
+  let elapsed          = 0;
+  let flickerDone      = false;
+  let debuffAssignedAt = -1;
+  let betaRoles        = null;
+  let aiPositioned     = false;
+  let alphaPositioned  = false;
+  let bossFollowDone   = false;
+
+  const FLICKER_START  = 2000;
+  const FLICKER_DUR    = 400;
+  const ORB_MOVE_DELAY = 3000;   // debuff 부여 후 → 오브 이동 시작 (잔여 5초)
+  const AI_MOVE_DELAY  = 5000;   // debuff 부여 후 → AI 이동 (잔여 3초)
 
   return (dt) => {
     elapsed += dt;
 
+    // 구 깜빡임 → 오브 등장 + 디버프 배정
     if (!flickerDone && elapsed >= FLICKER_START) {
       const fe    = elapsed - FLICKER_START;
       const phase = Math.floor(fe / 100) % 2;
@@ -175,12 +314,65 @@ export function mechanicTick(engine) {
       west.visible = phase === 0;
 
       if (fe >= FLICKER_DUR) {
-        flickerDone  = true;
-        east.visible = true;
-        west.visible = true;
+        flickerDone      = true;
+        debuffAssignedAt = elapsed;
+        east.visible  = true;
+        west.visible  = true;
         east.showOrbs = true;
         west.showOrbs = true;
-        assignDebuffs(engine);
+        betaRoles = assignDebuffs(engine);
+      }
+    }
+
+    if (debuffAssignedAt < 0) return;
+
+    // 오브 이동 + 충돌 판정 (디버프 잔여 5초 시점부터)
+    if (elapsed >= debuffAssignedAt + ORB_MOVE_DELAY) {
+      east.tickOrbs(dt);
+      west.tickOrbs(dt);
+      checkOrbCollisions(engine, nonRefSphere, shortPair);
+
+      if (!alphaPositioned) {
+        alphaPositioned = true;
+        positionAlphaAI(engine, betaRoles.alpha);
+      }
+    }
+
+    // 베타 AI 이동 (디버프 잔여 3초 시점)
+    if (!aiPositioned && elapsed >= debuffAssignedAt + AI_MOVE_DELAY) {
+      aiPositioned = true;
+      positionBetaAI(engine, betaRoles.beta, nonRefSphere, shortPair);
+    }
+
+    // 보스: 베타 탱커 추적 — 삼각형 팁이 탱커와 겹치면 정지
+    if (betaRoles && engine.boss && !bossFollowDone) {
+      const betaTankRole = betaRoles.beta.find(r => r.startsWith('T'));
+      const target = betaTankRole
+        ? (engine.player.role === betaTankRole
+            ? engine.player
+            : engine.partyMembers.find(p => p.role === betaTankRole && p.alive))
+        : null;
+
+      if (target) {
+        const ddx  = target.x - engine.boss.x;
+        const ddy  = target.y - engine.boss.y;
+        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+
+        // 삼각형 팁 위치 (boss.angle 방향 기준 1.25r 앞)
+        const bossR   = engine.boss.radius;
+        const tipLen  = bossR * 1.25;
+        const tipX    = engine.boss.x - tipLen * Math.sin(engine.boss.angle);
+        const tipY    = engine.boss.y + tipLen * Math.cos(engine.boss.angle);
+        const tipDist = Math.sqrt((target.x - tipX) ** 2 + (target.y - tipY) ** 2);
+
+        if (tipDist < (target.radius ?? 18)) {
+          bossFollowDone = true;
+        } else if (dist > 1) {
+          engine.boss.setFacing(Math.atan2(ddy, ddx) - Math.PI / 2);
+          const step = Math.min(BOSS_FOLLOW_SPEED * engine.arenaRadius * dt / 1000, dist);
+          engine.boss.x += (ddx / dist) * step;
+          engine.boss.y += (ddy / dist) * step;
+        }
       }
     }
   };
