@@ -44,6 +44,8 @@ function loadImg(src) {
 }
 
 const sphereImg = loadImg('img/reference/mana_sphere_before.jpg');
+const afterImg  = loadImg('img/reference/mana_sphere_after.jpg');
+const switchImg = loadImg('img/reference/mana_sphere_switch.jpg');
 const alphaImg  = loadImg('img/reference/mana_sphere_alpha.jpg');
 const betaImg   = loadImg('img/reference/mana_sphere_beta.jpg');
 const orbImgs = {
@@ -138,8 +140,10 @@ class SphereDrawable {
     const y  = cy;
     const s  = SPHERE_SIZE * r;
 
-    if (this.visible && sphereImg.complete && sphereImg.naturalWidth > 0) {
-      ctx.drawImage(sphereImg, x - s / 2, y - s / 2, s, s);
+    if (this.visible) {
+      const allAbsorbed = this.showOrbs && this.orbs.every(o => o.offset <= 0);
+      const sImg = allAbsorbed ? afterImg : sphereImg;
+      if (sImg.complete && sImg.naturalWidth > 0) ctx.drawImage(sImg, x - s / 2, y - s / 2, s, s);
     }
 
     if (this.showOrbs) {
@@ -156,28 +160,6 @@ class SphereDrawable {
         ctx.drawImage(img, pos.x - w / 2, pos.y - h / 2, w, h);
       }
     }
-  }
-}
-
-// 이동 목표 위치를 알리는 맥동 링
-class RingIndicator {
-  constructor(x, y, r) {
-    this.x = x;
-    this.y = y;
-    this.r = r;
-    this.visible = true;
-  }
-
-  draw(ctx) {
-    if (!this.visible) return;
-    const alpha = 0.35 + 0.35 * Math.sin(performance.now() / 300);
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255, 220, 50, ${alpha})`;
-    ctx.lineWidth   = 3;
-    ctx.stroke();
-    ctx.restore();
   }
 }
 
@@ -319,13 +301,16 @@ export function mechanicTick(engine) {
   // 비기준구: 전부 0.5 → 플레이어가 실제로 충돌하는 쪽
   const nonRefSphere = refDx === 1 ? west : east;
 
-  let elapsed          = 0;
-  let flickerDone      = false;
-  let debuffAssignedAt = -1;
-  let betaRoles        = null;
-  let aiPositioned     = false;
-  let alphaPositioned  = false;
-  let bossFollowDone   = false;
+  let elapsed              = 0;
+  let flickerDone          = false;
+  let debuffAssignedAt     = -1;
+  let betaRoles            = null;
+  let aiPositioned         = false;
+  let alphaPositioned      = false;
+  let bossFollowDone       = false;
+  let bossFollowActive     = false;
+  let switchApplied        = false;
+  let secondDebuffApplied  = false;
 
   const FLICKER_START  = 2000;
   const FLICKER_DUR    = 400;
@@ -372,20 +357,10 @@ export function mechanicTick(engine) {
       aiPositioned = true;
       positionBetaAI(engine, betaRoles.beta, nonRefSphere, shortPair);
 
-      // 플레이어가 베타일 때 타깃 위치 링 표시
-      if (betaRoles.beta.includes(engine.selectedRole)) {
-        const isTank  = engine.selectedRole.startsWith('T');
-        const tgtSide = isTank ? 'north' : 'south';
-        const tgtOrb  = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === tgtSide);
-        if (tgtOrb) {
-          const pos = nonRefSphere.orbInterceptPos(tgtOrb, 0.15);
-          engine.drawables.push(new RingIndicator(pos.x, pos.y, engine.arenaRadius * 0.06));
-        }
-      }
     }
 
-    // 보스: 베타 탱커 추적 — 삼각형 팁이 탱커와 겹치면 정지
-    if (betaRoles && engine.boss && !bossFollowDone) {
+    // 보스: 베타 탱커 추적 (aiPositioned 이후부터, 탱커가 충분히 멀어진 뒤 활성화)
+    if (betaRoles && aiPositioned && engine.boss && !bossFollowDone) {
       const betaTankRole = betaRoles.beta.find(r => r.startsWith('T'));
       const target = betaTankRole
         ? (engine.player.role === betaTankRole
@@ -397,20 +372,46 @@ export function mechanicTick(engine) {
         const ddx  = target.x - engine.boss.x;
         const ddy  = target.y - engine.boss.y;
         const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-
-        // boss 중심이 tipLen+target.radius 이내 → 팁이 탱커 원에 닿은 것으로 판단, 이동 종료
         const bossR  = engine.boss.radius;
         const tipLen = bossR * 1.25;
         const stopAt = tipLen + (target.radius ?? 18);
 
-        if (dist <= stopAt) {
-          bossFollowDone = true;
-        } else {
-          engine.boss.setFacing(Math.atan2(ddy, ddx) - Math.PI / 2);
-          const step = Math.min(BOSS_FOLLOW_SPEED * engine.arenaRadius * dt / 1000, dist - stopAt);
-          engine.boss.x += (ddx / dist) * step;
-          engine.boss.y += (ddy / dist) * step;
+        // 탱커가 stopAt 이상 멀어졌을 때 추적 시작 (초기 중심 겹침 상태에서 즉시 종료 방지)
+        if (!bossFollowActive && dist > stopAt) bossFollowActive = true;
+
+        if (bossFollowActive) {
+          if (dist <= stopAt) {
+            bossFollowDone = true;
+          } else {
+            engine.boss.setFacing(Math.atan2(ddy, ddx) - Math.PI / 2);
+            const step = Math.min(BOSS_FOLLOW_SPEED * engine.arenaRadius * dt / 1000, dist - stopAt);
+            engine.boss.x += (ddx / dist) * step;
+            engine.boss.y += (ddy / dist) * step;
+          }
         }
+      }
+    }
+
+    // 스위치 버프 (첫 디버프 종료 시점, 3초 지속)
+    if (!switchApplied && debuffAssignedAt >= 0 && elapsed >= debuffAssignedAt + 8000) {
+      switchApplied = true;
+      for (const m of [engine.player, ...engine.partyMembers]) {
+        m.statusEffects.push({ type: 'switch', remainMs: 3000, img: switchImg });
+      }
+    }
+
+    // 두 번째 디버프: 알파⇔베타 교체, 16초 지속
+    if (!secondDebuffApplied && betaRoles && elapsed >= debuffAssignedAt + 11000) {
+      secondDebuffApplied = true;
+      for (const role of betaRoles.alpha) {
+        const e = { type: 'beta', remainMs: 16000, img: betaImg };
+        if (engine.player.role === role) engine.player.statusEffects.push(e);
+        else { const pm = engine.partyMembers.find(p => p.role === role); if (pm) pm.statusEffects.push(e); }
+      }
+      for (const role of betaRoles.beta) {
+        const e = { type: 'alpha', remainMs: 16000, img: alphaImg };
+        if (engine.player.role === role) engine.player.statusEffects.push(e);
+        else { const pm = engine.partyMembers.find(p => p.role === role); if (pm) pm.statusEffects.push(e); }
       }
     }
   };
