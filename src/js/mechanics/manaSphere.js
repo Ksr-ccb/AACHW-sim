@@ -122,7 +122,8 @@ class SphereDrawable {
     for (const orb of this.orbs) {
       if (orb.pauseMs > 0) {
         orb.pauseMs = Math.max(0, orb.pauseMs - dt);
-      } else if (!orb.used && orb.offset > 0) {
+      } else if (orb.offset > 0) {
+        // used여도 일시정지 후 구 중심으로 계속 이동
         orb.offset = Math.max(0, orb.offset - ORB_MOVE_SPEED * dt);
       }
     }
@@ -155,6 +156,28 @@ class SphereDrawable {
         ctx.drawImage(img, pos.x - w / 2, pos.y - h / 2, w, h);
       }
     }
+  }
+}
+
+// 이동 목표 위치를 알리는 맥동 링
+class RingIndicator {
+  constructor(x, y, r) {
+    this.x = x;
+    this.y = y;
+    this.r = r;
+    this.visible = true;
+  }
+
+  draw(ctx) {
+    if (!this.visible) return;
+    const alpha = 0.35 + 0.35 * Math.sin(performance.now() / 300);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 220, 50, ${alpha})`;
+    ctx.lineWidth   = 3;
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -202,13 +225,13 @@ function assignDebuffs(engine) {
 }
 
 // 비기준구 충돌 판정 — shortPair 색상 오브만 처리
-function checkOrbCollisions(engine, nonRefSphere, shortPair) {
+function checkOrbCollisions(engine, nonRefSphere, shortPair, betaRoles) {
   const allActors = [engine.player, ...engine.partyMembers.filter(p => p.alive)];
   const hitDist   = ORB_HIT_DIST * engine.arenaRadius;
 
   for (const orb of nonRefSphere.orbs) {
     if (orb.used || orb.pauseMs > 0 || orb.offset <= 0) continue;
-    if (PAIR[orb.color] !== shortPair) continue;   // 롱 색상 오브 건너뜀
+    if (PAIR[orb.color] !== shortPair) continue;
 
     const pos = nonRefSphere.orbWorldPos(orb);
 
@@ -232,8 +255,20 @@ function checkOrbCollisions(engine, nonRefSphere, shortPair) {
         else actor.alive = false;
       }
     } else {
-      // 남쪽 오브: 비탱커 3명 미만 즉사
-      if (nonTanks.length < 3) {
+      // 남쪽 오브: 플레이어가 베타 비탱커로 충돌 시 → 나머지 베타 힐/딜 AI 즉시 소환
+      const playerTriggered = touchers.includes(engine.player)
+        && !engine.selectedRole.startsWith('T')
+        && betaRoles.beta.includes(engine.selectedRole);
+
+      if (playerTriggered) {
+        const others = betaRoles.beta.filter(r => !r.startsWith('T') && r !== engine.selectedRole);
+        for (const role of others) {
+          const pm = engine.partyMembers.find(p => p.role === role && p.alive);
+          if (pm) { pm.x = pos.x; pm.y = pos.y; pm.targetX = pos.x; pm.targetY = pos.y; }
+        }
+        // 순간이동 후 3명 충족 → 피해 없음
+      } else if (nonTanks.length < 3) {
+        // AI끼리 또는 알파 플레이어가 혼자 맞으면 즉사
         for (const actor of nonTanks) {
           if (actor === engine.player) engine.gameOver = true;
           else actor.alive = false;
@@ -254,23 +289,17 @@ function positionAlphaAI(engine, alphaRoles) {
   }
 }
 
-// 베타 AI → 비기준구의 shortPair 오브 인터셉트 위치로 이동
+// 베타 탱커 AI만 인터셉트 위치로 이동 (힐/딜러는 플레이어 충돌 시 순간이동)
 function positionBetaAI(engine, betaRoles, nonRefSphere, shortPair) {
   const northOrb = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === 'north');
-  const southOrb = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === 'south');
 
   for (const role of betaRoles) {
+    if (!role.startsWith('T')) continue;     // 탱커만
     if (role === engine.selectedRole) continue;
     const pm = engine.partyMembers.find(p => p.role === role && p.alive);
-    if (!pm) continue;
-
-    if (role.startsWith('T') && northOrb) {
-      const p = nonRefSphere.orbInterceptPos(northOrb, 0.15);
-      pm.tweenTo(p.x, p.y, 1800);
-    } else if (!role.startsWith('T') && southOrb) {
-      const p = nonRefSphere.orbInterceptPos(southOrb, 0.15);
-      pm.tweenTo(p.x, p.y, 1800);
-    }
+    if (!pm || !northOrb) continue;
+    const p = nonRefSphere.orbInterceptPos(northOrb, 0.15);
+    pm.tweenTo(p.x, p.y, 1800);
   }
 }
 
@@ -301,7 +330,7 @@ export function mechanicTick(engine) {
   const FLICKER_START  = 2000;
   const FLICKER_DUR    = 400;
   const ORB_MOVE_DELAY = 3000;   // debuff 부여 후 → 오브 이동 시작 (잔여 5초)
-  const AI_MOVE_DELAY  = 5000;   // debuff 부여 후 → AI 이동 (잔여 3초)
+  const AI_MOVE_DELAY  = 4000;   // debuff 부여 후 → AI 이동 (잔여 4초)
 
   return (dt) => {
     elapsed += dt;
@@ -330,7 +359,7 @@ export function mechanicTick(engine) {
     if (elapsed >= debuffAssignedAt + ORB_MOVE_DELAY) {
       east.tickOrbs(dt);
       west.tickOrbs(dt);
-      checkOrbCollisions(engine, nonRefSphere, shortPair);
+      checkOrbCollisions(engine, nonRefSphere, shortPair, betaRoles);
 
       if (!alphaPositioned) {
         alphaPositioned = true;
@@ -342,6 +371,17 @@ export function mechanicTick(engine) {
     if (!aiPositioned && elapsed >= debuffAssignedAt + AI_MOVE_DELAY) {
       aiPositioned = true;
       positionBetaAI(engine, betaRoles.beta, nonRefSphere, shortPair);
+
+      // 플레이어가 베타일 때 타깃 위치 링 표시
+      if (betaRoles.beta.includes(engine.selectedRole)) {
+        const isTank  = engine.selectedRole.startsWith('T');
+        const tgtSide = isTank ? 'north' : 'south';
+        const tgtOrb  = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === tgtSide);
+        if (tgtOrb) {
+          const pos = nonRefSphere.orbInterceptPos(tgtOrb, 0.15);
+          engine.drawables.push(new RingIndicator(pos.x, pos.y, engine.arenaRadius * 0.06));
+        }
+      }
     }
 
     // 보스: 베타 탱커 추적 — 삼각형 팁이 탱커와 겹치면 정지
