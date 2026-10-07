@@ -323,21 +323,29 @@ function sphereCenter(engine, sphere) {
   return { x: cx + sphere.dx * SPHERE_DIST * r, y: cy };
 }
 
-// AI를 안전지대(북/남)로 이동. purple 포함 시 N/S가 위험 → 이동하지 않음
-function moveAisToSafeZone(engine, allWaveColors) {
-  if (allWaveColors.includes('purple')) return;
+// AI를 안전지대(북/남)로 이동.
+// 안전지대 = green을 발동하는 구체의 도넛 innerRadius(0.25r) 안쪽.
+// 두 구체 중 정확히 하나만 green 발동 시에만 유효. 아니면 이동하지 않음.
+function moveAisToSafeZone(engine, refSphere, nonRefSphere, waveIndex) {
+  const refHasGreen    = refSphere.getWaveColors(waveIndex).includes('green');
+  const nonRefHasGreen = nonRefSphere.getWaveColors(waveIndex).includes('green');
 
-  const cx     = engine.canvas.width  / 2;
-  const cy     = engine.canvas.height / 2;
-  const offset = 0.55 * engine.arenaRadius;
+  if (refHasGreen === nonRefHasGreen) return; // 둘 다 있거나 둘 다 없음 → 안전지대 없음
+
+  const greenSphere = refHasGreen ? refSphere : nonRefSphere;
+  const r  = engine.arenaRadius;
+  const cx = engine.canvas.width  / 2;
+  const cy = engine.canvas.height / 2;
+  const sx = cx + greenSphere.dx * SPHERE_DIST * r;
+  const safeOffset = 0.2 * r; // 도넛 innerRadius(0.25r) 안쪽
 
   for (const pm of engine.partyMembers) {
     if (!pm.alive) continue;
     const debuff = pm.statusEffects.find(e => e.type === 'alpha' || e.type === 'beta');
     if (!debuff) continue;
-    const ty = debuff.type === 'alpha' ? cy - offset : cy + offset;
+    const ty = debuff.type === 'alpha' ? cy - safeOffset : cy + safeOffset;
     pm.speed = 2;
-    pm.setTarget(cx, ty);
+    pm.setTarget(sx, ty);
   }
 }
 
@@ -402,6 +410,7 @@ export function mechanicTick(engine) {
   let alphaPositioned      = false;
   let bossFollowDone       = false;
   let bossFollowActive     = false;
+  let currentBetaTankRole  = null;
   let switchApplied        = false;
   let secondDebuffApplied  = false;
   let secondDebuffAt       = -1;
@@ -433,6 +442,7 @@ export function mechanicTick(engine) {
         east.showOrbs = true;
         west.showOrbs = true;
         betaRoles = assignDebuffs(engine);
+        currentBetaTankRole = betaRoles.beta.find(r => r.startsWith('T')) ?? null;
       }
     }
 
@@ -457,14 +467,11 @@ export function mechanicTick(engine) {
 
     }
 
-    // 보스: 베타 탱커 추적 (aiPositioned 이후부터, 탱커가 충분히 멀어진 뒤 활성화)
-    if (betaRoles && aiPositioned && engine.boss && !bossFollowDone) {
-      const betaTankRole = betaRoles.beta.find(r => r.startsWith('T'));
-      const target = betaTankRole
-        ? (engine.player.role === betaTankRole
-            ? engine.player
-            : engine.partyMembers.find(p => p.role === betaTankRole && p.alive))
-        : null;
+    // 보스: 현재 베타 탱커 추적 (디버프 교체 시 대상 갱신됨)
+    if (currentBetaTankRole && aiPositioned && engine.boss && !bossFollowDone) {
+      const target = engine.player.role === currentBetaTankRole
+        ? engine.player
+        : engine.partyMembers.find(p => p.role === currentBetaTankRole && p.alive);
 
       if (target) {
         const ddx  = target.x - engine.boss.x;
@@ -502,6 +509,10 @@ export function mechanicTick(engine) {
     if (!secondDebuffApplied && betaRoles && elapsed >= debuffAssignedAt + 11000) {
       secondDebuffApplied = true;
       secondDebuffAt = elapsed;
+      // 보스 추적 탱커 교체 (원래 알파 탱커 → 이제 베타)
+      currentBetaTankRole = betaRoles.alpha.find(r => r.startsWith('T')) ?? null;
+      bossFollowDone   = false;
+      bossFollowActive = false;
       for (const role of betaRoles.alpha) {
         const e = { type: 'beta', remainMs: 26000, img: betaImg };
         if (engine.player.role === role) engine.player.statusEffects.push(e);
@@ -518,8 +529,7 @@ export function mechanicTick(engine) {
     if (!wave1AiMoved && secondDebuffAt >= 0 && elapsed >= secondDebuffAt + 6000 - AI_WAVE_PREP_MS) {
       wave1AiMoved = true;
       const refSphere1 = refDx === 1 ? east : west;
-      const w1Colors = [...refSphere1.getWaveColors(0), ...nonRefSphere.getWaveColors(0)];
-      moveAisToSafeZone(engine, w1Colors);
+      moveAisToSafeZone(engine, refSphere1, nonRefSphere, 0);
     }
 
     // Wave 1: 두 번째 디버프 부여 6초 후 — 구체별 첫 흡수 색 기믹
@@ -530,16 +540,15 @@ export function mechanicTick(engine) {
       fireOrbMechanics(engine, nonRefSphere.getWaveColors(0), [nonRefSphere]);
     }
 
-    // Wave 2: 2초 전 AI 안전지대 이동
-    if (!wave2AiMoved && secondDebuffAt >= 0 && elapsed >= secondDebuffAt + 12000 - AI_WAVE_PREP_MS) {
+    // Wave 2: wave 1 끝나자마자 이동 시작
+    if (!wave2AiMoved && wave1Fired && elapsed >= secondDebuffAt + 6000 + WAVE_HIT_MS) {
       wave2AiMoved = true;
       const refSphere2 = refDx === 1 ? east : west;
-      const w2Colors = [...refSphere2.getWaveColors(1), ...nonRefSphere.getWaveColors(1)];
-      moveAisToSafeZone(engine, w2Colors);
+      moveAisToSafeZone(engine, refSphere2, nonRefSphere, 1);
     }
 
-    // Wave 2: Wave 1 후 6초 — 구체별 두번째 흡수 색 기믹
-    if (!wave2Fired && wave1Fired && elapsed >= secondDebuffAt + 12000) {
+    // Wave 2: Wave 1 후 8초 — 구체별 두번째 흡수 색 기믹
+    if (!wave2Fired && wave1Fired && elapsed >= secondDebuffAt + 14000) {
       wave2Fired = true;
       const refSphere = refDx === 1 ? east : west;
       fireOrbMechanics(engine, refSphere.getWaveColors(1), [refSphere]);
