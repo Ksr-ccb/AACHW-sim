@@ -398,18 +398,16 @@ export function mechanicTick(engine) {
         const ddy  = target.y - engine.boss.y;
         const dist = Math.sqrt(ddx * ddx + ddy * ddy);
 
-        // 삼각형 팁 위치 (boss.angle 방향 기준 1.25r 앞)
-        const bossR   = engine.boss.radius;
-        const tipLen  = bossR * 1.25;
-        const tipX    = engine.boss.x - tipLen * Math.sin(engine.boss.angle);
-        const tipY    = engine.boss.y + tipLen * Math.cos(engine.boss.angle);
-        const tipDist = Math.sqrt((target.x - tipX) ** 2 + (target.y - tipY) ** 2);
+        // boss 중심이 tipLen+target.radius 이내 → 팁이 탱커 원에 닿은 것으로 판단, 이동 종료
+        const bossR  = engine.boss.radius;
+        const tipLen = bossR * 1.25;
+        const stopAt = tipLen + (target.radius ?? 18);
 
-        if (tipDist < (target.radius ?? 18)) {
+        if (dist <= stopAt) {
           bossFollowDone = true;
-        } else if (dist > 1) {
+        } else {
           engine.boss.setFacing(Math.atan2(ddy, ddx) - Math.PI / 2);
-          const step = Math.min(BOSS_FOLLOW_SPEED * engine.arenaRadius * dt / 1000, dist);
+          const step = Math.min(BOSS_FOLLOW_SPEED * engine.arenaRadius * dt / 1000, dist - stopAt);
           engine.boss.x += (ddx / dist) * step;
           engine.boss.y += (ddy / dist) * step;
         }
