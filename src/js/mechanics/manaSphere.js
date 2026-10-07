@@ -312,14 +312,33 @@ function positionBetaAI(engine, betaRoles, nonRefSphere, shortPair) {
 
 // ── 오브 기믹 발동 ──────────────────────────────────────────────
 
-const WAVE_WARN_MS = 0;      // 예고 없음 — 즉시 발동
-const WAVE_HIT_MS  = 2000;   // 장판 지속 2초
+const WAVE_WARN_MS    = 0;     // 예고 없음 — 즉시 발동
+const WAVE_HIT_MS     = 2000;  // 장판 지속 2초
+const AI_WAVE_PREP_MS = 2000;  // 장판 발동 2초 전 AI 이동
 
 function sphereCenter(engine, sphere) {
   const r  = engine.arenaRadius;
   const cx = engine.canvas.width  / 2;
   const cy = engine.canvas.height / 2;
   return { x: cx + sphere.dx * SPHERE_DIST * r, y: cy };
+}
+
+// AI를 안전지대(북/남)로 이동. purple 포함 시 N/S가 위험 → 이동하지 않음
+function moveAisToSafeZone(engine, allWaveColors) {
+  if (allWaveColors.includes('purple')) return;
+
+  const cx     = engine.canvas.width  / 2;
+  const cy     = engine.canvas.height / 2;
+  const offset = 0.55 * engine.arenaRadius;
+
+  for (const pm of engine.partyMembers) {
+    if (!pm.alive) continue;
+    const debuff = pm.statusEffects.find(e => e.type === 'alpha' || e.type === 'beta');
+    if (!debuff) continue;
+    const ty = debuff.type === 'alpha' ? cy - offset : cy + offset;
+    pm.speed = 2;
+    pm.setTarget(cx, ty);
+  }
 }
 
 function fireOrbMechanics(engine, colors, spheres) {
@@ -388,6 +407,8 @@ export function mechanicTick(engine) {
   let secondDebuffAt       = -1;
   let wave1Fired           = false;
   let wave2Fired           = false;
+  let wave1AiMoved         = false;
+  let wave2AiMoved         = false;
 
   const FLICKER_START  = 2000;
   const FLICKER_DUR    = 400;
@@ -493,12 +514,28 @@ export function mechanicTick(engine) {
       }
     }
 
+    // Wave 1: 2초 전 AI 안전지대 이동
+    if (!wave1AiMoved && secondDebuffAt >= 0 && elapsed >= secondDebuffAt + 6000 - AI_WAVE_PREP_MS) {
+      wave1AiMoved = true;
+      const refSphere1 = refDx === 1 ? east : west;
+      const w1Colors = [...refSphere1.getWaveColors(0), ...nonRefSphere.getWaveColors(0)];
+      moveAisToSafeZone(engine, w1Colors);
+    }
+
     // Wave 1: 두 번째 디버프 부여 6초 후 — 구체별 첫 흡수 색 기믹
     if (!wave1Fired && secondDebuffAt >= 0 && elapsed >= secondDebuffAt + 6000) {
       wave1Fired = true;
       const refSphere = refDx === 1 ? east : west;
       fireOrbMechanics(engine, refSphere.getWaveColors(0), [refSphere]);
       fireOrbMechanics(engine, nonRefSphere.getWaveColors(0), [nonRefSphere]);
+    }
+
+    // Wave 2: 2초 전 AI 안전지대 이동
+    if (!wave2AiMoved && secondDebuffAt >= 0 && elapsed >= secondDebuffAt + 12000 - AI_WAVE_PREP_MS) {
+      wave2AiMoved = true;
+      const refSphere2 = refDx === 1 ? east : west;
+      const w2Colors = [...refSphere2.getWaveColors(1), ...nonRefSphere.getWaveColors(1)];
+      moveAisToSafeZone(engine, w2Colors);
     }
 
     // Wave 2: Wave 1 후 6초 — 구체별 두번째 흡수 색 기믹
