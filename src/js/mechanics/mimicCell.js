@@ -4,9 +4,9 @@ import { BossClone } from '../core/BossClone.js';
 
 export const ARENA = 'img/M12s-P2a-Arena.png';
 
-const CLONE_ANGLES      = [0, 60, 120, 180, 240, 300];
-const CLONE_DIST        = 0.4;
-const CLONE_RADIUS      = 0.9;  // engine.tileSize 배율 (보스 ~2.0보다 작게)
+const CLONE_ANGLES      = [0, 45, 135, 180, 225, 315];
+const CLONE_DIST        = 0.5;
+const CLONE_RADIUS      = 0.85;  // engine.tileSize 배율 (보스 ~2.0보다 작게)
 
 // 극좌표(angle°, dist) → 캔버스 픽셀 좌표 (0=북, 시계방향)
 function polar(engine, angleDeg, dist) {
