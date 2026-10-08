@@ -7,10 +7,11 @@
           <value>
             <TabSessionState>
               <option name="provider" value="claude" />
-              <option name="sessionId" value="f396211d-ad23-4235-a294-0d70be27162a" />
-              <option name="cwd" value="D:\code\AACHW-sim" />
+              <option name="sessionId" value="5129d65b-7c10-4bf2-aa8a-a99cbb5d9616" />
+              <option name="cwd" value="$PROJECT_DIR$" />
               <option name="model" value="claude-sonnet-4-6" />
-              <option name="permissionMode" value="default" />
+              <option name="permissionMode" value="bypassPermissions" />
+              <option name="reasoningEffort" value="high" />
             </TabSessionState>
           </value>
         </entry>

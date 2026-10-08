@@ -18,6 +18,7 @@ export class GameEngine {
     this.aoes = [];
     this.bossClones = [];
     this.playerReplicas = [];
+    this.drawables = [];
     this.bgImage = null;
     this.markerOverlay = null;
     this.running = false;
@@ -79,10 +80,13 @@ export class GameEngine {
     for (const pm of this.partyMembers) pm.visible = this.partyVisible;
 
     this.aoes = [];
+    this.drawables = [];
     this.gameOver = false;
     this.mechActive = false;
     this.debuffs = { flame: 0, dark: 0 };
     this._mechanicTick = null;
+    if (this.player) this.player.statusEffects = [];
+    for (const pm of this.partyMembers) pm.statusEffects = [];
     this.running = true;
     this.lastTime = null;
     if (this._rafId) cancelAnimationFrame(this._rafId);
@@ -105,13 +109,22 @@ export class GameEngine {
     this.aoes = [];
     this.bossClones = [];
     this.playerReplicas = [];
+    this.drawables = [];
     this.debuffs = { flame: 0, dark: 0 };
     this.gameOver = false;
+    if (this.player) this.player.statusEffects = [];
+    for (const pm of this.partyMembers) pm.statusEffects = [];
     const cx = this.canvas.width / 2;
     const cy = this.canvas.height / 2;
     if (this.player) {
       this.player.x = cx;
       this.player.y = cy;
+    }
+    if (this.boss) {
+      this.boss.x = cx;
+      this.boss.y = cy;
+      this.boss.angle = Math.PI;
+      this.boss.stopCast();
     }
     for (const pm of this.partyMembers) {
       pm.x = cx; pm.y = cy;
@@ -166,6 +179,14 @@ export class GameEngine {
 
       for (const pm of this.partyMembers) pm.update(dt);
 
+      // statusEffects 타이머 tick
+      for (const e of this.player.statusEffects) e.remainMs -= dt;
+      this.player.statusEffects = this.player.statusEffects.filter(e => e.remainMs > 0);
+      for (const pm of this.partyMembers) {
+        for (const e of pm.statusEffects) e.remainMs -= dt;
+        pm.statusEffects = pm.statusEffects.filter(e => e.remainMs > 0);
+      }
+
       if (this.mechActive && this._mechanicTick) this._mechanicTick(dt);
 
       // AoE 업데이트
@@ -212,6 +233,8 @@ export class GameEngine {
 
     if (this.markerOverlay) this.markerOverlay.draw(ctx);
 
+    for (const d of this.drawables) d.draw(ctx);
+
     if (this.boss) this.boss.draw(ctx);
 
     for (const clone of this.bossClones) clone.draw(ctx);
@@ -239,22 +262,37 @@ export class GameEngine {
 
   _drawDebuffs() {
     const { ctx, canvas, debuffs, _debuffImgs } = this;
-    if (debuffs.flame === 0 && debuffs.dark === 0) return;
+    const hasStatus = this.player?.statusEffects?.length > 0;
+    if (debuffs.flame === 0 && debuffs.dark === 0 && !hasStatus) return;
 
     const iconH = 108;
     const pad   = 10;
     const y     = canvas.height - pad - iconH;
     let   x     = canvas.width  - pad;
 
-    const drawIcon = (img) => {
+    const drawIcon = (img, remainMs = null) => {
       if (!img.complete || img.naturalWidth === 0) return;
       const w = iconH * (img.naturalWidth / img.naturalHeight);
       x -= w;
       ctx.drawImage(img, x, y, w, iconH);
+      if (remainMs !== null) {
+        const secs   = Math.ceil(remainMs / 1000);
+        const timerH = 50;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(x, y + iconH - timerH, w, timerH);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold 42px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(secs, x + w / 2, y + iconH - timerH / 2);
+      }
       x -= pad;
     };
 
     if (debuffs.dark  > 0) drawIcon(_debuffImgs.dark);
     if (debuffs.flame > 0) drawIcon(_debuffImgs.flame);
+    for (const e of (this.player?.statusEffects ?? [])) {
+      if (e.img) drawIcon(e.img, e.remainMs);
+    }
   }
 }
