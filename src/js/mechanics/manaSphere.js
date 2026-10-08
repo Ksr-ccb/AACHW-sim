@@ -290,7 +290,10 @@ function positionAlphaAI(engine, alphaRoles) {
 function positionBetaAI(engine, betaRoles, nonRefSphere, shortPair) {
   const northOrb    = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === 'north');
   const southOrb    = nonRefSphere.orbs.find(o => PAIR[o.color] === shortPair && o.side === 'south');
-  const playerIsAlpha = !betaRoles.includes(engine.selectedRole);
+  // 플레이어가 베타 비탱커일 때만 본인이 오브 충돌 후 순간이동 → AI 제외
+  // 플레이어가 알파이거나 베타 탱커이면 AI가 직접 오브로 이동
+  const playerIsBetaNonTank = betaRoles.includes(engine.selectedRole)
+    && !engine.selectedRole.startsWith('T');
 
   for (const role of betaRoles) {
     if (role === engine.selectedRole) continue;
@@ -301,7 +304,7 @@ function positionBetaAI(engine, betaRoles, nonRefSphere, shortPair) {
       if (!northOrb) continue;
       const p = nonRefSphere.orbInterceptPos(northOrb, 0.15);
       pm.tweenTo(p.x, p.y, 1800);
-    } else if (playerIsAlpha) {
+    } else if (!playerIsBetaNonTank) {
       if (!southOrb) continue;
       const p = nonRefSphere.orbInterceptPos(southOrb, 0.15);
       pm.tweenTo(p.x, p.y, 1800);
@@ -313,8 +316,11 @@ function positionBetaAI(engine, betaRoles, nonRefSphere, shortPair) {
 // ── 오브 기믹 발동 ──────────────────────────────────────────────
 
 const WAVE_WARN_MS    = 0;     // 예고 없음 — 즉시 발동
-const WAVE_HIT_MS     = 2000;  // 장판 지속 2초
+const WAVE_HIT_MS     = 1000;  // 장판 지속 1초
 const AI_WAVE_PREP_MS = 2000;  // 장판 발동 2초 전 AI 이동
+
+const UNDERWORLD_CAST_MS = 4000;  // 지하세계 캐스팅 지속 시간
+const UNDERWORLD_AI_MS   = 2000;  // 캐스팅 시작 후 AI 이동 트리거 시점
 
 function sphereCenter(engine, sphere) {
   const r  = engine.arenaRadius;
@@ -326,7 +332,7 @@ function sphereCenter(engine, sphere) {
 // AI를 안전지대(북/남)로 이동.
 // 안전지대 = green을 발동하는 구체의 도넛 innerRadius(0.25r) 안쪽.
 // 두 구체 중 정확히 하나만 green 발동 시에만 유효. 아니면 이동하지 않음.
-function moveAisToSafeZone(engine, refSphere, nonRefSphere, waveIndex) {
+function moveAisToSafeZone(engine, refSphere, nonRefSphere, waveIndex, fastRole = null) {
   const refHasGreen    = refSphere.getWaveColors(waveIndex).includes('green');
   const nonRefHasGreen = nonRefSphere.getWaveColors(waveIndex).includes('green');
 
@@ -344,8 +350,8 @@ function moveAisToSafeZone(engine, refSphere, nonRefSphere, waveIndex) {
     const debuff = pm.statusEffects.find(e => e.type === 'alpha' || e.type === 'beta');
     if (!debuff) continue;
     const ty = debuff.type === 'alpha' ? cy - safeOffset : cy + safeOffset;
-    pm.speed = 2;
-    pm.setTarget(sx, ty);
+    const arrMs = pm.role === fastRole ? AI_WAVE_PREP_MS / 1.2 : AI_WAVE_PREP_MS;
+    pm.tweenTo(sx, ty, arrMs);
   }
 }
 
@@ -408,7 +414,6 @@ export function mechanicTick(engine) {
   let betaRoles            = null;
   let aiPositioned         = false;
   let alphaPositioned      = false;
-  let bossFollowDone       = false;
   let bossFollowActive     = false;
   let currentBetaTankRole  = null;
   let switchApplied        = false;
@@ -418,16 +423,26 @@ export function mechanicTick(engine) {
   let wave2Fired           = false;
   let wave1AiMoved         = false;
   let wave2AiMoved         = false;
+  let underworldType       = null;   // 'far' | 'near'
+  let underworldAt         = -1;
+  let underworldAiMoved    = false;
+  let underworldFired      = false;
 
   const FLICKER_START  = 2000;
   const FLICKER_DUR    = 400;
+  const CAST_DUR       = 3000;   // 변이 세포 캐스팅 지속 시간
   const ORB_MOVE_DELAY = 3000;   // debuff 부여 후 → 오브 이동 시작 (잔여 5초)
   const AI_MOVE_DELAY  = 4000;   // debuff 부여 후 → AI 이동 (잔여 4초)
+
+  // 기믹 시작: 구 비표시, 변이 세포 캐스팅 시작
+  east.visible = false;
+  west.visible = false;
+  engine.boss.startCast('변이 세포', CAST_DUR);
 
   return (dt) => {
     elapsed += dt;
 
-    // 구 깜빡임 → 오브 등장 + 디버프 배정
+    // 캐스팅 중 구 깜빡임 → 오브 등장 (시각 효과)
     if (!flickerDone && elapsed >= FLICKER_START) {
       const fe    = elapsed - FLICKER_START;
       const phase = Math.floor(fe / 100) % 2;
@@ -435,15 +450,20 @@ export function mechanicTick(engine) {
       west.visible = phase === 0;
 
       if (fe >= FLICKER_DUR) {
-        flickerDone      = true;
-        debuffAssignedAt = elapsed;
+        flickerDone   = true;
         east.visible  = true;
         west.visible  = true;
         east.showOrbs = true;
         west.showOrbs = true;
-        betaRoles = assignDebuffs(engine);
-        currentBetaTankRole = betaRoles.beta.find(r => r.startsWith('T')) ?? null;
       }
+    }
+
+    // 변이 세포 캐스팅 완료 → 디버프 랜덤 배정
+    if (debuffAssignedAt < 0 && elapsed >= CAST_DUR) {
+      engine.boss.stopCast();
+      debuffAssignedAt    = elapsed;
+      betaRoles           = assignDebuffs(engine);
+      currentBetaTankRole = betaRoles.beta.find(r => r.startsWith('T')) ?? null;
     }
 
     if (debuffAssignedAt < 0) return;
@@ -467,8 +487,8 @@ export function mechanicTick(engine) {
 
     }
 
-    // 보스: 현재 베타 탱커 추적 (디버프 교체 시 대상 갱신됨)
-    if (currentBetaTankRole && aiPositioned && engine.boss && !bossFollowDone) {
+    // 보스: 현재 베타 탱커 연속 추적 (디버프 배정 직후부터, 지하세계 캐스팅 중에는 정지)
+    if (currentBetaTankRole && engine.boss && !underworldType) {
       const target = engine.player.role === currentBetaTankRole
         ? engine.player
         : engine.partyMembers.find(p => p.role === currentBetaTankRole && p.alive);
@@ -477,31 +497,39 @@ export function mechanicTick(engine) {
         const ddx  = target.x - engine.boss.x;
         const ddy  = target.y - engine.boss.y;
         const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-        const bossR  = engine.boss.radius;
-        const tipLen = bossR * 1.25;
+        const tipLen = engine.boss.radius * 1.25;
         const stopAt = tipLen + (target.radius ?? 18);
 
-        // 탱커가 stopAt 이상 멀어졌을 때 추적 시작 (초기 중심 겹침 상태에서 즉시 종료 방지)
+        // 초기 중심 겹침 상태에서 즉시 붙어버리는 것 방지 — 한 번 멀어지면 이후 항상 추적
         if (!bossFollowActive && dist > stopAt) bossFollowActive = true;
 
-        if (bossFollowActive) {
-          if (dist <= stopAt) {
-            bossFollowDone = true;
-          } else {
-            engine.boss.setFacing(Math.atan2(ddy, ddx) - Math.PI / 2);
-            const step = Math.min(BOSS_FOLLOW_SPEED * engine.arenaRadius * dt / 1000, dist - stopAt);
-            engine.boss.x += (ddx / dist) * step;
-            engine.boss.y += (ddy / dist) * step;
-          }
+        if (bossFollowActive && dist > stopAt) {
+          engine.boss.setFacing(Math.atan2(ddy, ddx) - Math.PI / 2);
+          const step = Math.min(BOSS_FOLLOW_SPEED * engine.arenaRadius * dt / 1000, dist - stopAt);
+          engine.boss.x += (ddx / dist) * step;
+          engine.boss.y += (ddy / dist) * step;
         }
       }
     }
 
-    // 스위치 버프 (첫 디버프 종료 시점, 3초 지속)
+    // 스위치 버프 (첫 디버프 종료 시점, 3초 지속) + 보스 어글 탱커 교체
     if (!switchApplied && debuffAssignedAt >= 0 && elapsed >= debuffAssignedAt + 8000) {
       switchApplied = true;
       for (const m of [engine.player, ...engine.partyMembers]) {
         m.statusEffects.push({ type: 'switch', remainMs: 3000, img: switchImg });
+      }
+      // 스위치 타이밍에 보스가 새 베타 탱커(원래 알파)를 향해 즉시 돌아봄
+      currentBetaTankRole = betaRoles.alpha.find(r => r.startsWith('T')) ?? null;
+      bossFollowActive = false;
+      if (currentBetaTankRole && engine.boss) {
+        const newTank = engine.player.role === currentBetaTankRole
+          ? engine.player
+          : engine.partyMembers.find(p => p.role === currentBetaTankRole && p.alive);
+        if (newTank) {
+          const ddx = newTank.x - engine.boss.x;
+          const ddy = newTank.y - engine.boss.y;
+          engine.boss.setFacing(Math.atan2(ddy, ddx) - Math.PI / 2);
+        }
       }
     }
 
@@ -509,17 +537,13 @@ export function mechanicTick(engine) {
     if (!secondDebuffApplied && betaRoles && elapsed >= debuffAssignedAt + 11000) {
       secondDebuffApplied = true;
       secondDebuffAt = elapsed;
-      // 보스 추적 탱커 교체 (원래 알파 탱커 → 이제 베타)
-      currentBetaTankRole = betaRoles.alpha.find(r => r.startsWith('T')) ?? null;
-      bossFollowDone   = false;
-      bossFollowActive = false;
       for (const role of betaRoles.alpha) {
         const e = { type: 'beta', remainMs: 26000, img: betaImg };
         if (engine.player.role === role) engine.player.statusEffects.push(e);
         else { const pm = engine.partyMembers.find(p => p.role === role); if (pm) pm.statusEffects.push(e); }
       }
       for (const role of betaRoles.beta) {
-        const e = { type: 'alpha', remainMs: 16000, img: alphaImg };
+        const e = { type: 'alpha', remainMs: 26000, img: alphaImg };
         if (engine.player.role === role) engine.player.statusEffects.push(e);
         else { const pm = engine.partyMembers.find(p => p.role === role); if (pm) pm.statusEffects.push(e); }
       }
@@ -529,7 +553,7 @@ export function mechanicTick(engine) {
     if (!wave1AiMoved && secondDebuffAt >= 0 && elapsed >= secondDebuffAt + 6000 - AI_WAVE_PREP_MS) {
       wave1AiMoved = true;
       const refSphere1 = refDx === 1 ? east : west;
-      moveAisToSafeZone(engine, refSphere1, nonRefSphere, 0);
+      moveAisToSafeZone(engine, refSphere1, nonRefSphere, 0, currentBetaTankRole);
     }
 
     // Wave 1: 두 번째 디버프 부여 6초 후 — 구체별 첫 흡수 색 기믹
@@ -544,7 +568,7 @@ export function mechanicTick(engine) {
     if (!wave2AiMoved && wave1Fired && elapsed >= secondDebuffAt + 6000 + WAVE_HIT_MS) {
       wave2AiMoved = true;
       const refSphere2 = refDx === 1 ? east : west;
-      moveAisToSafeZone(engine, refSphere2, nonRefSphere, 1);
+      moveAisToSafeZone(engine, refSphere2, nonRefSphere, 1, currentBetaTankRole);
     }
 
     // Wave 2: Wave 1 후 8초 — 구체별 두번째 흡수 색 기믹
@@ -553,6 +577,81 @@ export function mechanicTick(engine) {
       const refSphere = refDx === 1 ? east : west;
       fireOrbMechanics(engine, refSphere.getWaveColors(1), [refSphere]);
       fireOrbMechanics(engine, nonRefSphere.getWaveColors(1), [nonRefSphere]);
+    }
+
+    // 지하세계 캐스팅 시작 (wave 2 장판 사라지자마자)
+    if (!underworldType && wave2Fired && elapsed >= secondDebuffAt + 14000 + WAVE_HIT_MS) {
+      underworldType = Math.random() < 0.5 ? 'far' : 'near';
+      underworldAt   = elapsed;
+      engine.boss.startCast(
+        underworldType === 'far' ? '지하세계:원거리' : '지하세계:근거리',
+        UNDERWORLD_CAST_MS,
+      );
+    }
+
+    // 지하세계 AI 이동 (캐스팅 2초 후)
+    // 베타팀이 전원 AI(플레이어가 알파)일 때만 베타AI 자동배치, 알파AI는 항상 이동
+    if (underworldType && !underworldAiMoved && elapsed >= underworldAt + UNDERWORLD_AI_MS) {
+      underworldAiMoved = true;
+      const r          = engine.arenaRadius;
+      const bossX      = engine.boss.x;
+      const bossY      = engine.boss.y;
+      const isFar      = underworldType === 'far';
+      const curBeta    = betaRoles.alpha;  // 디버프 교체 후 현재 베타 = 원래 알파
+      const playerIsBeta = curBeta.includes(engine.selectedRole);
+
+      // 원거리: 베타=보스 남쪽 0.25r, 알파=보스 북쪽 0.1r
+      // 근거리: 베타=보스 남쪽 0.1r, 알파=보스 북쪽 0.25r
+      const betaY  = bossY + (isFar ? 0.25 : 0.1) * r;
+      const alphaY = bossY - (isFar ? 0.1 : 0.25) * r;
+
+      for (const pm of engine.partyMembers) {
+        if (!pm.alive) continue;
+        const isPmBeta = curBeta.includes(pm.role);
+        if (isPmBeta && playerIsBeta) continue;  // 플레이어가 베타면 베타AI 자동배치 안함
+        pm.tweenTo(bossX, isPmBeta ? betaY : alphaY, 1800);
+      }
+    }
+
+    // 지하세계 피격 (캐스팅 완료, 4인 쉐어)
+    if (underworldType && !underworldFired && elapsed >= underworldAt + UNDERWORLD_CAST_MS) {
+      underworldFired = true;
+      engine.boss.stopCast();
+
+      const r      = engine.arenaRadius;
+      const shareR = 0.12 * r;
+      const isFar  = underworldType === 'far';
+      const allActors = [engine.player, ...engine.partyMembers.filter(p => p.alive)];
+
+      // 원거리=가장 먼 대상, 근거리=가장 가까운 대상이 AoE 중심
+      const sorted = [...allActors].sort((a, b) => {
+        const da = Math.hypot(a.x - engine.boss.x, a.y - engine.boss.y);
+        const db = Math.hypot(b.x - engine.boss.x, b.y - engine.boss.y);
+        return isFar ? db - da : da - db;
+      });
+      const tgt = sorted[0];
+
+      const inRange = allActors.filter(a =>
+        Math.hypot(a.x - tgt.x, a.y - tgt.y) < shareR + (a.radius ?? 20)
+      );
+
+      if (inRange.length < 4) {
+        for (const actor of inRange) {
+          if (actor === engine.player) engine.gameOver = true;
+          else actor.alive = false;
+        }
+      }
+
+      engine.aoes.push(new CircleAoE({
+        x: tgt.x, y: tgt.y,
+        radius: shareR,
+        delay: 0, duration: 500,
+        noAutoKill: true,
+        colors: {
+          telegraphRGB: '255,200,50', explodeRGB: '255,200,50',
+          telegraphStroke: '#ffcc00', explodeStroke: '#ffcc00',
+        },
+      }));
     }
   };
 }

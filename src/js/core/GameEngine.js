@@ -120,6 +120,12 @@ export class GameEngine {
       this.player.x = cx;
       this.player.y = cy;
     }
+    if (this.boss) {
+      this.boss.x = cx;
+      this.boss.y = cy;
+      this.boss.angle = Math.PI;
+      this.boss.stopCast();
+    }
     for (const pm of this.partyMembers) {
       pm.x = cx; pm.y = cy;
       pm.targetX = cx; pm.targetY = cy;
