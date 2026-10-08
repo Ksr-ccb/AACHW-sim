@@ -589,16 +589,14 @@ export function mechanicTick(engine) {
       );
     }
 
-    // 지하세계 AI 이동 (캐스팅 2초 후)
-    // 베타팀이 전원 AI(플레이어가 알파)일 때만 베타AI 자동배치, 알파AI는 항상 이동
+    // 지하세계 AI 이동 (캐스팅 2초 후) — 플레이어 역할과 무관하게 항상 배치
     if (underworldType && !underworldAiMoved && elapsed >= underworldAt + UNDERWORLD_AI_MS) {
       underworldAiMoved = true;
-      const r          = engine.arenaRadius;
-      const bossX      = engine.boss.x;
-      const bossY      = engine.boss.y;
-      const isFar      = underworldType === 'far';
-      const curBeta    = betaRoles.alpha;  // 디버프 교체 후 현재 베타 = 원래 알파
-      const playerIsBeta = curBeta.includes(engine.selectedRole);
+      const r      = engine.arenaRadius;
+      const bossX  = engine.boss.x;
+      const bossY  = engine.boss.y;
+      const isFar  = underworldType === 'far';
+      const curBeta = betaRoles.alpha;  // 디버프 교체 후 현재 베타 = 원래 알파
 
       // 원거리: 베타=보스 남쪽 0.25r, 알파=보스 북쪽 0.1r
       // 근거리: 베타=보스 남쪽 0.1r, 알파=보스 북쪽 0.25r
@@ -608,7 +606,6 @@ export function mechanicTick(engine) {
       for (const pm of engine.partyMembers) {
         if (!pm.alive) continue;
         const isPmBeta = curBeta.includes(pm.role);
-        if (isPmBeta && playerIsBeta) continue;  // 플레이어가 베타면 베타AI 자동배치 안함
         pm.tweenTo(bossX, isPmBeta ? betaY : alphaY, 1800);
       }
     }
