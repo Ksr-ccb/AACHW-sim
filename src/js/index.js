@@ -58,7 +58,7 @@ function showDevNotice() {
 }
 
 async function selectMechanic(key) {
-  if (key === 'mimicCell' || key === 'dream1' || key === 'dream2' ) { showDevNotice(); return; }
+  if (key === 'dream1' || key === 'dream2') { showDevNotice(); return; }
   if (currentKey === key) return;
   currentKey = key;
 
