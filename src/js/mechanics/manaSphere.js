@@ -154,9 +154,7 @@ class SphereDrawable {
     const s  = SPHERE_SIZE * r;
 
     if (this.visible) {
-      const allAbsorbed = this.showOrbs && this.orbs.every(o => o.offset <= 0);
-      const sImg = allAbsorbed ? afterImg : sphereImg;
-      if (sImg.complete && sImg.naturalWidth > 0) ctx.drawImage(sImg, x - s / 2, y - s / 2, s, s);
+      if (sphereImg.complete && sphereImg.naturalWidth > 0) ctx.drawImage(sphereImg, x - s / 2, y - s / 2, s, s);
     }
 
     if (this.showOrbs) {
@@ -173,6 +171,20 @@ class SphereDrawable {
         ctx.drawImage(img, pos.x - w / 2, pos.y - h / 2, w, h);
       }
     }
+  }
+
+  drawOverlay(ctx) {
+    if (!this.visible) return;
+    const allAbsorbed = this.showOrbs && this.orbs.every(o => o.offset <= 0);
+    if (!allAbsorbed) return;
+    const { engine, dx } = this;
+    const cx = engine.canvas.width  / 2;
+    const cy = engine.canvas.height / 2;
+    const r  = engine.arenaRadius;
+    const x  = cx + dx * SPHERE_DIST * r;
+    const y  = cy;
+    const s  = SPHERE_SIZE * r;
+    if (afterImg.complete && afterImg.naturalWidth > 0) ctx.drawImage(afterImg, x - s / 2, y - s / 2, s, s);
   }
 }
 
@@ -358,10 +370,10 @@ function moveAisToSafeZone(engine, refSphere, nonRefSphere, waveIndex, fastRole 
 function fireOrbMechanics(engine, colors, spheres) {
   const r = engine.arenaRadius;
 
-  const greenColors  = { telegraphRGB: '50,180,50',   explodeRGB: '50,180,50',   telegraphStroke: '#44ff44', explodeStroke: '#44ff44' };
-  const blueColors   = { telegraphRGB: '50,100,220',  explodeRGB: '50,100,220',  telegraphStroke: '#4466ff', explodeStroke: '#4466ff' };
-  const purpleColors = { telegraphRGB: '160,50,220',  explodeRGB: '160,50,220',  telegraphStroke: '#aa44ff', explodeStroke: '#aa44ff' };
-  const redColors    = { telegraphRGB: '220,50,50',   explodeRGB: '220,50,50',   telegraphStroke: '#ff4444', explodeStroke: '#ff4444' };
+  const greenColors  = { telegraphRGB: '50,180,50',   explodeRGB: '50,180,50',   telegraphStroke: '#44ff44', explodeStroke: '#44ff44', explodeAlpha: 0.5 };
+  const blueColors   = { telegraphRGB: '50,100,220',  explodeRGB: '50,100,220',  telegraphStroke: '#4466ff', explodeStroke: '#4466ff', explodeAlpha: 0.5 };
+  const purpleColors = { telegraphRGB: '160,50,220',  explodeRGB: '160,50,220',  telegraphStroke: '#aa44ff', explodeStroke: '#aa44ff', explodeAlpha: 0.5 };
+  const redColors    = { telegraphRGB: '220,50,50',   explodeRGB: '220,50,50',   telegraphStroke: '#ff4444', explodeStroke: '#ff4444', explodeAlpha: 0.5 };
 
   for (const sphere of spheres) {
     const { x: sx, y: sy } = sphereCenter(engine, sphere);

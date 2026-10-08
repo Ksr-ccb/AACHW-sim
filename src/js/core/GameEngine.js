@@ -247,6 +247,8 @@ export class GameEngine {
 
     this.player.draw(ctx);
 
+    for (const d of this.drawables) { if (d.drawOverlay) d.drawOverlay(ctx); }
+
     this._drawDebuffs();
 
     if (this.gameOver) {

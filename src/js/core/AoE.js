@@ -39,7 +39,9 @@ export class CircleAoE {
 
   draw(ctx) {
     const t = this.delay > 0 ? Math.min(this.elapsed / this.delay, 1) : 1;
-    const alpha = this.isExploding ? 0.85 : 0.25 + t * 0.25;
+    const alpha = this.isExploding
+      ? (this.colors?.explodeAlpha ?? 0.85)
+      : (this.colors?.telegraphAlpha ?? (0.25 + t * 0.25));
 
     let fillColor, strokeColor;
     if (this.colors) {
@@ -110,7 +112,9 @@ export class DonutAoE {
 
   draw(ctx) {
     const t     = this.delay > 0 ? Math.min(this.elapsed / this.delay, 1) : 1;
-    const alpha = this.isExploding ? 0.85 : 0.25 + t * 0.25;
+    const alpha = this.isExploding
+      ? (this.colors?.explodeAlpha ?? 0.85)
+      : (this.colors?.telegraphAlpha ?? (0.25 + t * 0.25));
 
     let fillColor, strokeColor;
     if (this.colors) {
@@ -193,7 +197,9 @@ export class FanAoE {
 
   draw(ctx) {
     const t = Math.min(this.elapsed / this.delay, 1);
-    const alpha = this.isExploding ? 0.85 : 0.25 + t * 0.25;
+    const alpha = this.isExploding
+      ? (this.colors?.explodeAlpha ?? 0.85)
+      : (this.colors?.telegraphAlpha ?? (0.25 + t * 0.25));
 
     let fillColor, strokeColor;
     if (this.colors) {
